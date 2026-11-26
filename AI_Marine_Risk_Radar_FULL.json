@@ -1,0 +1,1127 @@
+{
+  "name": "AI Marine Risk Radar — полный контур с журналом и офицером",
+  "nodes": [
+    {
+      "id": "Демо: Запуск в 1 клик",
+      "name": "Демо: Запуск в 1 клик",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "Выбор демо-сценария",
+      "name": "Выбор демо-сценария",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Учебное судно, географический коридор из каталога. Измените scenario: PACIFIC / RED_SEA / CAPE\nconst scenario='PACIFIC';\nconst cases={PACIFIC:{imo:'9187655',vessel_name:'TEST PACIFIC',destination_country:'Китай',route:'Козьмино → Жичжао',chokepoint:'Восточно-Китайское море'},RED_SEA:{imo:'9456783',vessel_name:'TEST RED SEA',destination_country:'Индия',route:'Новороссийск → Мундра',chokepoint:'Баб-эль-Мандеб'},CAPE:{imo:'9312341',vessel_name:'TEST CAPE',destination_country:'Индия',route:'Приморск → Вадинар',chokepoint:'Мыс Доброй Надежды'}};\nreturn [{json:{...cases[scenario],declared_price_usd:'57,50',policy_price_limit:'',manual_chokepoints:'',request_id:'DEMO-'+Date.now()}}];"
+      }
+    },
+    {
+      "id": "Веб-форма: Проверка рейса",
+      "name": "Веб-форма: Проверка рейса",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "formTitle": "AI Marine Risk Radar — проверка рейса",
+        "formDescription": "Рекомендация требует проверки офицера. Цена: точка или запятая, округление до 2 знаков. Маршрут: порт → точки → порт. Неизвестные коридоры требуют уточнения.",
+        "authentication": "none",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "IMO номер танкера (7 цифр)",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Название танкера",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Страна назначения / Покупатель",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Маршрут следования (Порты)",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Заявленная цена нефти ($/баррель)",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Критический пролив / опасная зона (выбор из списка)",
+              "fieldType": "text",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Дополнительные проливы / ручной ввод нескольких зон (через запятую)",
+              "fieldType": "text",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Порог цены для сценарного контроля ($/баррель)",
+              "fieldType": "text",
+              "requiredField": false
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "Запрос обработан. Итог и ID записи доступны в Executions и Data Tables. При ошибке проверьте введённые данные."
+            }
+          }
+        }
+      },
+      "webhookId": "marine-risk-form-v3"
+    },
+    {
+      "id": "Webhook: Внешний API / Веб-терминал",
+      "name": "Webhook: Внешний API / Веб-терминал",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        530
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "marine-risk-voyage-check",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "marine-risk-api-v3"
+    },
+    {
+      "id": "Валидация IMO и нормализация",
+      "name": "Валидация IMO и нормализация",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "jsCode": "/* Shared deterministic assessment for browser and n8n. No navigation or registry claims. */\n(function(root) {\n 'use strict';\n const VERSION = '3.0.0';\n const fields = [\n ['imo','IMO номер танкера (7 цифр)'], ['vessel_name','Название танкера'],\n ['destination_country','Страна назначения / Покупатель'], ['route','Маршрут следования (Порты)'],\n ['declared_price_usd','Заявленная цена нефти ($/баррель)'],\n ['chokepoint','Критический пролив / опасная зона (выбор из списка)'],\n ['manual_chokepoints','Дополнительные проливы / ручной ввод нескольких зон (через запятую)'],\n ['policy_price_limit','Порог цены для сценарного контроля ($/баррель)']\n ];\n const zones = [\n ['bab','Баб-эль-Мандеб / Красное море',12.58,43.33,/мандеб|красное море/i],\n ['suez','Суэцкий канал',29.97,32.55,/суэц/i],\n ['bos','Босфор',41.11,29.07,/босфор/i], ['dar','Дарданеллы',40.2,26.4,/дарданелл/i],\n ['cape','Мыс Доброй Надежды',-35,19,/надежд|африк/i],\n ['gib','Гибралтар',35.95,-5.6,/гибралтар/i],\n ['dan','Датские проливы',55.3,11,/датск|балтийск|storeb/i],\n ['east','Восточно-Китайское море',29.5,123.5,/восточно-китайск|восточно китайск/i],\n ['taiwan','Тайваньский пролив',24,119,/тайван/i],\n ['japan','Японское море',40,135,/японск/i],\n ['hormuz','Ормузский пролив',26.56,56.25,/ормуз|персидск/i],\n ['malacca','Малаккский пролив',2.5,101.8,/малакк/i],\n ['sing','Сингапурский пролив',1.25,103.8,/сингапур/i],\n ['sts','Лаконский залив',36.55,22.6,/лаконск|sts/i]\n ];\n const ports = [\n ['nov','Новороссийск',44.72,37.77,/новороссийск/i], ['prim','Приморск',60.33,28.72,/приморск/i],\n ['ust','Усть-Луга',59.68,28.4,/усть[ -]луга/i], ['koz','Козьмино',42.72,133.02,/козьмин/i],\n ['mundra','Мундра',22.83,69.7,/мундр/i], ['vadinar','Вадинар',22.4,69.72,/вадинар/i],\n ['rizhao','Жичжао',35.35,119.55,/жичжао|жичжау|rizhao/i],\n ['rot','Роттердам',51.95,4.05,/роттердам/i], ['sg','Сингапур',1.25,103.8,/сингапур/i]\n ];\n const identify = (text, list) => list.filter(z=>z[4].test(text)).map(z=>z[0]);\n function validImo(s) {return /^\\d{7}$/.test(s) && s.slice(0,6).split('').reduce((v,d,i)=>v+Number(d)*(7-i),0)%10===Number(s[6]);}\n function decimal(v, optional=false) {\n  const s=String(v??'').trim();\n  if (!s && optional) return null;\n  if (!/^\\d+(?:[.,]\\d{1,6})?$/.test(s)) throw Error('Цена: положительное число, точка или запятая, до 6 знаков после разделителя.');\n  const [a,b='']=s.replace(',','.').split('.');\n  const cents=Number(a)*100+Number((b+'00').slice(0,2))+(Number(b[2]||0)>=5?1:0);\n  if (!Number.isSafeInteger(cents)||cents<=0||cents>1000000) throw Error('Цена должна быть больше 0 и не более 10000.');\n  return cents/100;\n }\n function normalize(raw) {\n  const body=raw.body&&typeof raw.body==='object'?raw.body:raw; const n={};\n  for (const [key,label] of fields) n[key]=String(body[key]??body[label]??'').trim();\n  if (!validImo(n.imo)) throw Error('IMO: нужны 7 цифр и правильная контрольная сумма mod 10.');\n  for (const key of ['vessel_name','destination_country','route']) if(n[key].length<2||n[key].length>300) throw Error('Заполните '+fields.find(f=>f[0]===key)[1]+' (2–300 символов).');\n  if(n.chokepoint.length>300||n.manual_chokepoints.length>500) throw Error('Слишком длинный список зон.');\n  n.declared_price_usd=decimal(n.declared_price_usd);\n  n.policy_price_limit=decimal(n.policy_price_limit,true);\n  if (/свой вариант/i.test(n.chokepoint)) n.chokepoint='';\n  n.chokepoints=[n.chokepoint,n.manual_chokepoints].filter(Boolean).join(', ');\n  return n;\n }\n function routeInfo(n,withAlternatives=true) {\n  const parts=n.route.split(/\\s*(?:→|->|=>|;)\\s*/).filter(Boolean);\n  const errors=[], warnings=[];\n  if(parts.length<2) errors.push('Укажите порт отправления и назначения через → или ->.');\n  const start=ports.find(p=>p[4].test(parts[0]||''));\n  const end=ports.find(p=>p[4].test(parts.at(-1)||''));\n  const declared=identify(n.route+' '+n.chokepoints,zones);\n  let corridor=null, inferred=[];\n  if(start?.[0]==='koz'&&end?.[0]==='rizhao') {corridor='pacific'; inferred=['japan','east'];}\n  const india=['mundra','vadinar'].includes(end?.[0]);\n  if(['nov','prim','ust'].includes(start?.[0])&&india) {\n   if(declared.includes('cape')) {corridor='cape';inferred=start[0]==='nov'?['bos','dar','gib','cape']:['dan','cape'];}\n   else if(declared.includes('suez')||declared.includes('bab')) {corridor='suez';inferred=start[0]==='nov'?['bos','dar','suez','bab']:['dan','gib','suez','bab'];}\n   else warnings.push('Для пути в Индию уточните коридор: Суэц или мыс Доброй Надежды.');\n  }\n  if(!start||!end||!corridor) warnings.push('Маршрут вне проверяемого каталога. Промежуточные моря автоматически не достраиваются; нужна проверка офицера.');\n  const allowed=new Set([...inferred]);\n  if(corridor) for(const id of declared) if(!allowed.has(id)) errors.push('Зона «'+zones.find(z=>z[0]===id)[1]+'» не входит в выбранный коридор. Проверьте маршрут и цепочку.');\n  for(const token of n.chokepoints.split(/[,;]/).filter(s=>s.trim())) if(!identify(token,zones).length) warnings.push('Неизвестная зона: '+token.trim()+'. Её риск не оценён.');\n  for(const token of parts.slice(1,-1)) if(!identify(token,zones).length&&!/северное море/i.test(token)) warnings.push('Промежуточная точка не распознана: '+token);\n  if(declared.includes('cape')&&declared.includes('bab')) errors.push('Одновременно заданы обход Африки и Баб-эль-Мандеб. Уточните один маршрут.');\n  if(end&&(['rizhao'].includes(end[0])&&!/китай|china/i.test(n.destination_country)||india&&!/индия|india/i.test(n.destination_country))) errors.push('Страна назначения не соответствует известному порту назначения.');\n  const ids=[...new Set([...inferred,...declared])];\n  const known=(id)=>{const z=zones.find(z=>z[0]===id);return {id,name:z[1],point:[z[2],z[3]]};};\n  let points=[];\n  if(corridor) {\n   const middle=inferred.flatMap(id=>id==='japan'?[[40,135],[35.2,130],[34,129.5],[32,126]]:id==='cape'?[[30,-15],[0,-15],[-25,3],[-35,19],[-30,40],[-5,60]]:id==='gib'?[[36,18],[36,2],[35.95,-5.6]]:id==='bab'?[[23,36],[16,41],[12.58,43.33],[13,50]]:[known(id).point]);\n   points=[[start[2],start[3]],...middle,[end[2],end[3]]];\n  }\n  const alternatives=[];\n  if(withAlternatives&&corridor&&errors.length===0){\n   if(corridor==='suez'||corridor==='cape'){\n    const other=routeInfo({...n,route:start[1]+' → '+end[1],chokepoints:corridor==='suez'?'Мыс Доброй Надежды':'Суэц, Баб-эль-Мандеб'},false);\n    alternatives.push({label:corridor==='suez'?'Вариант обхода через мыс Доброй Надежды':'Сравнение через Суэц: критическая зона, не рекомендация',points:other.points,requires_verification:true});\n   }else if(corridor==='pacific'){\n    alternatives.push({label:'Вариант через Цугару и Тихий океан: требует проверки офицера',points:[[start[2],start[3]],[42,137],[41.6,140],[41.6,141.6],[40,144],[35,142],[30,133],[29,130],[29,125],[end[2],end[3]]],requires_verification:true});\n   }\n  }\n  return {corridor,errors,warnings,assumed:inferred.map(id=>known(id).name),zones:ids.map(known),points,alternatives,labels:[start,end].filter(Boolean).map(p=>({point:[p[2],p[3]],name:p[1]}))};\n }\n function weather(raw,now=Date.now()) {\n  const h=raw?.hourly, t=h?.time||[];\n  const candidates=t.map((v,i)=>({i,delta:Math.abs(Date.parse(v.endsWith('Z')?v:v+'Z')-now)})).filter(x=>Number.isFinite(x.delta)&&x.delta<=3*3600000).sort((a,b)=>a.delta-b.delta);\n  const i=candidates[0]?.i;\n  const w=i===undefined?null:h.wave_height?.[i], c=i===undefined?null:h.ocean_current_velocity?.[i];\n  const live=typeof w==='number'&&Number.isFinite(w)&&w>=0;\n  return {wave:live?w:null,current:typeof c==='number'&&Number.isFinite(c)?c:null,live,sample_time:i===undefined?null:t[i],source:live?'Open-Meteo Marine':'Нет актуальных данных',current_unit:raw?.hourly_units?.ocean_current_velocity||'не указана'};\n }\n function assess(n,w={live:false,wave:null,current:null},requestId='') {\n  const route=routeInfo(n), ids=route.zones.map(z=>z.id), reasons=[],warnings=[...route.warnings];\n  const compliance=n.policy_price_limit===null?null:n.declared_price_usd>n.policy_price_limit?90:15;\n  if(compliance===null) warnings.push('Порог цены не задан: санкционный комплаенс не проверен.');\n  else reasons.push(`Цена $${n.declared_price_usd.toFixed(2)} ${compliance===90?'>':'≤'} сценарного порога $${n.policy_price_limit.toFixed(2)}: ${compliance}/100. Порог не является правовым заключением.`);\n  const war=ids.includes('bab')?88:ids.includes('hormuz')?65:ids.includes('east')?20:15;\n  reasons.push('Маршрутный сценарный индикатор: '+war+'/100. Это не вероятность атаки и не актуальная сводка UKMTO.');\n  const wave=w.live&&typeof w.wave==='number'?Math.min(100,Math.round(w.wave*25)):null;\n  if(wave===null) warnings.push('Актуальная высота волны не получена; погодный риск неизвестен.');\n  else reasons.push(`Волна ${w.wave} м × 25, максимум 100 → ${wave}/100.`);\n  warnings.push('Реестры санкций, AIS, страхование и ограничения судна не подключены; требуется ручная проверка.');\n  const bottleneck=ids.some(id=>['bos','suez','bab','malacca','hormuz'].includes(id))?70:20;\n  const scores={compliance,war,ais:null,weather:wave,bottleneck};\n  const observed=[war,bottleneck,compliance,wave].filter(Number.isFinite);\n  const totalRisk=Math.max(...observed), level=totalRisk>=65?'RED':totalRisk>=40?'YELLOW':'GREEN';\n  const status=route.errors.length?'INPUT_REVIEW_REQUIRED':'AWAITING_OFFICER';\n  return {schema_version:VERSION,request_id:requestId,imo:n.imo,vessel:n.vessel_name,route:n.route,country:n.destination_country,price:n.declared_price_usd,chokepoints:n.chokepoints,parameters:n,route_info:route,totalRisk,level,status,isLowRisk:level==='GREEN',isAutoApproved:false,requires_officer:true,scores,weather:w,reasons,warnings,dominanceReason:route.errors[0]||reasons.join(' '),economics:{warPremium:null,capeFuel:null,capeDemurrage:null},wormHash:'',timestamp:new Date().toISOString()};\n }\n const api={VERSION,fields,zones,ports,validImo,decimal,normalize,routeInfo,weather,assess};\n if(typeof module!=='undefined'&&module.exports) module.exports=api;\n root.MarineRisk=api;\n})(typeof globalThis!=='undefined'?globalThis:this);\n\nconst raw=$input.first().json;try{const n=MarineRisk.normalize(raw); const route=MarineRisk.routeInfo(n);return [{json:{valid:route.errors.length===0,parameters:n,route_info:route,request_id:String((raw.body||raw).request_id||'N8N-'+$execution.id),errors:route.errors}}];}catch(e){return [{json:{schema_version:MarineRisk.VERSION,valid:false,status:'VALIDATION_FAILED',errors:[e.message],requires_officer:true,isAutoApproved:false}}];}"
+      }
+    },
+    {
+      "id": "Данные согласованы?",
+      "name": "Данные согласованы?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Погода: Open-Meteo Marine",
+      "name": "Погода: Open-Meteo Marine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "url": "=https://marine-api.open-meteo.com/v1/marine?latitude={{ $json.route_info.zones[0]?.point[0] ?? 0 }}&longitude={{ $json.route_info.zones[0]?.point[1] ?? 0 }}&hourly=wave_height,ocean_current_velocity&forecast_days=2&timezone=GMT",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "Единый расчёт риска v3",
+      "name": "Единый расчёт риска v3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "jsCode": "/* Shared deterministic assessment for browser and n8n. No navigation or registry claims. */\n(function(root) {\n 'use strict';\n const VERSION = '3.0.0';\n const fields = [\n ['imo','IMO номер танкера (7 цифр)'], ['vessel_name','Название танкера'],\n ['destination_country','Страна назначения / Покупатель'], ['route','Маршрут следования (Порты)'],\n ['declared_price_usd','Заявленная цена нефти ($/баррель)'],\n ['chokepoint','Критический пролив / опасная зона (выбор из списка)'],\n ['manual_chokepoints','Дополнительные проливы / ручной ввод нескольких зон (через запятую)'],\n ['policy_price_limit','Порог цены для сценарного контроля ($/баррель)']\n ];\n const zones = [\n ['bab','Баб-эль-Мандеб / Красное море',12.58,43.33,/мандеб|красное море/i],\n ['suez','Суэцкий канал',29.97,32.55,/суэц/i],\n ['bos','Босфор',41.11,29.07,/босфор/i], ['dar','Дарданеллы',40.2,26.4,/дарданелл/i],\n ['cape','Мыс Доброй Надежды',-35,19,/надежд|африк/i],\n ['gib','Гибралтар',35.95,-5.6,/гибралтар/i],\n ['dan','Датские проливы',55.3,11,/датск|балтийск|storeb/i],\n ['east','Восточно-Китайское море',29.5,123.5,/восточно-китайск|восточно китайск/i],\n ['taiwan','Тайваньский пролив',24,119,/тайван/i],\n ['japan','Японское море',40,135,/японск/i],\n ['hormuz','Ормузский пролив',26.56,56.25,/ормуз|персидск/i],\n ['malacca','Малаккский пролив',2.5,101.8,/малакк/i],\n ['sing','Сингапурский пролив',1.25,103.8,/сингапур/i],\n ['sts','Лаконский залив',36.55,22.6,/лаконск|sts/i]\n ];\n const ports = [\n ['nov','Новороссийск',44.72,37.77,/новороссийск/i], ['prim','Приморск',60.33,28.72,/приморск/i],\n ['ust','Усть-Луга',59.68,28.4,/усть[ -]луга/i], ['koz','Козьмино',42.72,133.02,/козьмин/i],\n ['mundra','Мундра',22.83,69.7,/мундр/i], ['vadinar','Вадинар',22.4,69.72,/вадинар/i],\n ['rizhao','Жичжао',35.35,119.55,/жичжао|жичжау|rizhao/i],\n ['rot','Роттердам',51.95,4.05,/роттердам/i], ['sg','Сингапур',1.25,103.8,/сингапур/i]\n ];\n const identify = (text, list) => list.filter(z=>z[4].test(text)).map(z=>z[0]);\n function validImo(s) {return /^\\d{7}$/.test(s) && s.slice(0,6).split('').reduce((v,d,i)=>v+Number(d)*(7-i),0)%10===Number(s[6]);}\n function decimal(v, optional=false) {\n  const s=String(v??'').trim();\n  if (!s && optional) return null;\n  if (!/^\\d+(?:[.,]\\d{1,6})?$/.test(s)) throw Error('Цена: положительное число, точка или запятая, до 6 знаков после разделителя.');\n  const [a,b='']=s.replace(',','.').split('.');\n  const cents=Number(a)*100+Number((b+'00').slice(0,2))+(Number(b[2]||0)>=5?1:0);\n  if (!Number.isSafeInteger(cents)||cents<=0||cents>1000000) throw Error('Цена должна быть больше 0 и не более 10000.');\n  return cents/100;\n }\n function normalize(raw) {\n  const body=raw.body&&typeof raw.body==='object'?raw.body:raw; const n={};\n  for (const [key,label] of fields) n[key]=String(body[key]??body[label]??'').trim();\n  if (!validImo(n.imo)) throw Error('IMO: нужны 7 цифр и правильная контрольная сумма mod 10.');\n  for (const key of ['vessel_name','destination_country','route']) if(n[key].length<2||n[key].length>300) throw Error('Заполните '+fields.find(f=>f[0]===key)[1]+' (2–300 символов).');\n  if(n.chokepoint.length>300||n.manual_chokepoints.length>500) throw Error('Слишком длинный список зон.');\n  n.declared_price_usd=decimal(n.declared_price_usd);\n  n.policy_price_limit=decimal(n.policy_price_limit,true);\n  if (/свой вариант/i.test(n.chokepoint)) n.chokepoint='';\n  n.chokepoints=[n.chokepoint,n.manual_chokepoints].filter(Boolean).join(', ');\n  return n;\n }\n function routeInfo(n,withAlternatives=true) {\n  const parts=n.route.split(/\\s*(?:→|->|=>|;)\\s*/).filter(Boolean);\n  const errors=[], warnings=[];\n  if(parts.length<2) errors.push('Укажите порт отправления и назначения через → или ->.');\n  const start=ports.find(p=>p[4].test(parts[0]||''));\n  const end=ports.find(p=>p[4].test(parts.at(-1)||''));\n  const declared=identify(n.route+' '+n.chokepoints,zones);\n  let corridor=null, inferred=[];\n  if(start?.[0]==='koz'&&end?.[0]==='rizhao') {corridor='pacific'; inferred=['japan','east'];}\n  const india=['mundra','vadinar'].includes(end?.[0]);\n  if(['nov','prim','ust'].includes(start?.[0])&&india) {\n   if(declared.includes('cape')) {corridor='cape';inferred=start[0]==='nov'?['bos','dar','gib','cape']:['dan','cape'];}\n   else if(declared.includes('suez')||declared.includes('bab')) {corridor='suez';inferred=start[0]==='nov'?['bos','dar','suez','bab']:['dan','gib','suez','bab'];}\n   else warnings.push('Для пути в Индию уточните коридор: Суэц или мыс Доброй Надежды.');\n  }\n  if(!start||!end||!corridor) warnings.push('Маршрут вне проверяемого каталога. Промежуточные моря автоматически не достраиваются; нужна проверка офицера.');\n  const allowed=new Set([...inferred]);\n  if(corridor) for(const id of declared) if(!allowed.has(id)) errors.push('Зона «'+zones.find(z=>z[0]===id)[1]+'» не входит в выбранный коридор. Проверьте маршрут и цепочку.');\n  for(const token of n.chokepoints.split(/[,;]/).filter(s=>s.trim())) if(!identify(token,zones).length) warnings.push('Неизвестная зона: '+token.trim()+'. Её риск не оценён.');\n  for(const token of parts.slice(1,-1)) if(!identify(token,zones).length&&!/северное море/i.test(token)) warnings.push('Промежуточная точка не распознана: '+token);\n  if(declared.includes('cape')&&declared.includes('bab')) errors.push('Одновременно заданы обход Африки и Баб-эль-Мандеб. Уточните один маршрут.');\n  if(end&&(['rizhao'].includes(end[0])&&!/китай|china/i.test(n.destination_country)||india&&!/индия|india/i.test(n.destination_country))) errors.push('Страна назначения не соответствует известному порту назначения.');\n  const ids=[...new Set([...inferred,...declared])];\n  const known=(id)=>{const z=zones.find(z=>z[0]===id);return {id,name:z[1],point:[z[2],z[3]]};};\n  let points=[];\n  if(corridor) {\n   const middle=inferred.flatMap(id=>id==='japan'?[[40,135],[35.2,130],[34,129.5],[32,126]]:id==='cape'?[[30,-15],[0,-15],[-25,3],[-35,19],[-30,40],[-5,60]]:id==='gib'?[[36,18],[36,2],[35.95,-5.6]]:id==='bab'?[[23,36],[16,41],[12.58,43.33],[13,50]]:[known(id).point]);\n   points=[[start[2],start[3]],...middle,[end[2],end[3]]];\n  }\n  const alternatives=[];\n  if(withAlternatives&&corridor&&errors.length===0){\n   if(corridor==='suez'||corridor==='cape'){\n    const other=routeInfo({...n,route:start[1]+' → '+end[1],chokepoints:corridor==='suez'?'Мыс Доброй Надежды':'Суэц, Баб-эль-Мандеб'},false);\n    alternatives.push({label:corridor==='suez'?'Вариант обхода через мыс Доброй Надежды':'Сравнение через Суэц: критическая зона, не рекомендация',points:other.points,requires_verification:true});\n   }else if(corridor==='pacific'){\n    alternatives.push({label:'Вариант через Цугару и Тихий океан: требует проверки офицера',points:[[start[2],start[3]],[42,137],[41.6,140],[41.6,141.6],[40,144],[35,142],[30,133],[29,130],[29,125],[end[2],end[3]]],requires_verification:true});\n   }\n  }\n  return {corridor,errors,warnings,assumed:inferred.map(id=>known(id).name),zones:ids.map(known),points,alternatives,labels:[start,end].filter(Boolean).map(p=>({point:[p[2],p[3]],name:p[1]}))};\n }\n function weather(raw,now=Date.now()) {\n  const h=raw?.hourly, t=h?.time||[];\n  const candidates=t.map((v,i)=>({i,delta:Math.abs(Date.parse(v.endsWith('Z')?v:v+'Z')-now)})).filter(x=>Number.isFinite(x.delta)&&x.delta<=3*3600000).sort((a,b)=>a.delta-b.delta);\n  const i=candidates[0]?.i;\n  const w=i===undefined?null:h.wave_height?.[i], c=i===undefined?null:h.ocean_current_velocity?.[i];\n  const live=typeof w==='number'&&Number.isFinite(w)&&w>=0;\n  return {wave:live?w:null,current:typeof c==='number'&&Number.isFinite(c)?c:null,live,sample_time:i===undefined?null:t[i],source:live?'Open-Meteo Marine':'Нет актуальных данных',current_unit:raw?.hourly_units?.ocean_current_velocity||'не указана'};\n }\n function assess(n,w={live:false,wave:null,current:null},requestId='') {\n  const route=routeInfo(n), ids=route.zones.map(z=>z.id), reasons=[],warnings=[...route.warnings];\n  const compliance=n.policy_price_limit===null?null:n.declared_price_usd>n.policy_price_limit?90:15;\n  if(compliance===null) warnings.push('Порог цены не задан: санкционный комплаенс не проверен.');\n  else reasons.push(`Цена $${n.declared_price_usd.toFixed(2)} ${compliance===90?'>':'≤'} сценарного порога $${n.policy_price_limit.toFixed(2)}: ${compliance}/100. Порог не является правовым заключением.`);\n  const war=ids.includes('bab')?88:ids.includes('hormuz')?65:ids.includes('east')?20:15;\n  reasons.push('Маршрутный сценарный индикатор: '+war+'/100. Это не вероятность атаки и не актуальная сводка UKMTO.');\n  const wave=w.live&&typeof w.wave==='number'?Math.min(100,Math.round(w.wave*25)):null;\n  if(wave===null) warnings.push('Актуальная высота волны не получена; погодный риск неизвестен.');\n  else reasons.push(`Волна ${w.wave} м × 25, максимум 100 → ${wave}/100.`);\n  warnings.push('Реестры санкций, AIS, страхование и ограничения судна не подключены; требуется ручная проверка.');\n  const bottleneck=ids.some(id=>['bos','suez','bab','malacca','hormuz'].includes(id))?70:20;\n  const scores={compliance,war,ais:null,weather:wave,bottleneck};\n  const observed=[war,bottleneck,compliance,wave].filter(Number.isFinite);\n  const totalRisk=Math.max(...observed), level=totalRisk>=65?'RED':totalRisk>=40?'YELLOW':'GREEN';\n  const status=route.errors.length?'INPUT_REVIEW_REQUIRED':'AWAITING_OFFICER';\n  return {schema_version:VERSION,request_id:requestId,imo:n.imo,vessel:n.vessel_name,route:n.route,country:n.destination_country,price:n.declared_price_usd,chokepoints:n.chokepoints,parameters:n,route_info:route,totalRisk,level,status,isLowRisk:level==='GREEN',isAutoApproved:false,requires_officer:true,scores,weather:w,reasons,warnings,dominanceReason:route.errors[0]||reasons.join(' '),economics:{warPremium:null,capeFuel:null,capeDemurrage:null},wormHash:'',timestamp:new Date().toISOString()};\n }\n const api={VERSION,fields,zones,ports,validImo,decimal,normalize,routeInfo,weather,assess};\n if(typeof module!=='undefined'&&module.exports) module.exports=api;\n root.MarineRisk=api;\n})(typeof globalThis!=='undefined'?globalThis:this);\n\nconst p=$('Валидация IMO и нормализация').first().json; const w=p.route_info.zones.length?MarineRisk.weather($input.first().json):MarineRisk.weather({});return [{json:MarineRisk.assess(p.parameters,w,p.request_id)}];"
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Ты помощник риск-офицера. Только перечисли, какие данные человеку надо проверить. Не утверждай рейс, не меняй числовые оценки и не выдумывай данные AIS, санкций и погоды. Верни JSON с полем checklist (массив строк)."
+            },
+            {
+              "role": "user",
+              "content": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "values": {
+              "type": "json_object"
+            }
+          },
+          "temperature": 0.1
+        }
+      },
+      "id": "node-openai-agent",
+      "name": "ИИ-Аналитик: Синтез риска (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        1390,
+        -50
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "Карточка: Итоговый отчет аудита",
+      "name": "Карточка: Итоговый отчет аудита",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1630,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// LLM does not determine scores, permissions, approval or route.\nconst result=$('Контроль полноты и готовности к ревью').first().json;\nconst raw=$input.first().json;let parsed=raw;try{const text=raw.message?.content||raw.choices?.[0]?.message?.content||raw.content||raw.text;if(typeof text==='string')parsed=JSON.parse(text);}catch{}\nconst checklist=Array.isArray(parsed.checklist)?parsed.checklist.filter(x=>typeof x==='string'&&x.length<500).slice(0,8):[];\nreturn [{json:{...result,llm_checklist:checklist,llm_status:checklist.length?'UNVERIFIED_ASSISTANT_TEXT':'UNAVAILABLE',ai_note:'Текст LLM требует проверки. Числовые правила и решение ему не делегированы.'}}];"
+      }
+    },
+    {
+      "id": "Ошибка входных данных",
+      "name": "Ошибка входных данных",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        450
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(x=>({json:{schema_version:'3.0.0',status:'VALIDATION_FAILED',errors:x.json.errors||['Проверьте маршрут'],imo:x.json.parameters?.imo||'',request_id:x.json.request_id||'',requires_officer:true,isAutoApproved:false}}));"
+      }
+    },
+    {
+      "id": "Безопасный ключ просмотра",
+      "name": "Безопасный ключ просмотра",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        200
+      ],
+      "parameters": {
+        "action": "generate",
+        "encodingType": "uuid",
+        "dataPropertyName": "access_token"
+      }
+    },
+    {
+      "id": "Пакет оценки для журнала",
+      "name": "Пакет оценки для журнала",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const a=$input.first().json;const assessment_id='MRR-'+$execution.id;const origin='https://lavrik.app.n8n.cloud';const result={...a,assessment_id,workflow_revision:'4.0',officer_form_url:origin+'/form/marine-risk-officer-v4?'+encodeURIComponent('ID оценки')+'='+encodeURIComponent(assessment_id),status_api_url:origin+'/webhook/marine-risk-status',server_audit:true};return [{json:{assessment_id,record_type:'ASSESSMENT',access_token:a.access_token,payload:JSON.stringify(result),status:'AWAITING_OFFICER'}}];"
+      }
+    },
+    {
+      "id": "Подготовить серверный журнал",
+      "name": "Подготовить серверный журнал",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2280,
+        200
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "marine_risk_events_v4",
+        "columns": {
+          "column": [
+            {
+              "name": "assessment_id",
+              "type": "string"
+            },
+            {
+              "name": "record_type",
+              "type": "string"
+            },
+            {
+              "name": "access_token",
+              "type": "string"
+            },
+            {
+              "name": "payload",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "Сохранить оценку в n8n",
+      "name": "Сохранить оценку в n8n",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2500,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Подготовить серверный журнал').first().json.id }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "assessment_id": "={{ $('Пакет оценки для журнала').first().json.assessment_id }}",
+            "record_type": "={{ $('Пакет оценки для журнала').first().json.record_type }}",
+            "access_token": "={{ $('Пакет оценки для журнала').first().json.access_token }}",
+            "payload": "={{ $('Пакет оценки для журнала').first().json.payload }}",
+            "status": "={{ $('Пакет оценки для журнала').first().json.status }}"
+          },
+          "schema": [
+            {
+              "id": "assessment_id",
+              "displayName": "assessment_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "record_type",
+              "displayName": "record_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "access_token",
+              "displayName": "access_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Вернуть сохранённую оценку программе",
+      "name": "Вернуть сохранённую оценку программе",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const row=$input.first().json;if(!row.id)throw Error('Оценка не сохранена');const result=JSON.parse($('Пакет оценки для журнала').first().json.payload);return [{json:{...result,audit_row_id:row.id,formSubmittedText:'Оценка '+result.assessment_id+' сохранена. Риск '+result.totalRisk+'/100. Статус: ожидание офицера. Форма решения: '+result.officer_form_url}}];"
+      }
+    },
+    {
+      "id": "Офицер: защищённая форма решения",
+      "name": "Офицер: защищённая форма решения",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        930
+      ],
+      "parameters": {
+        "authentication": "basicAuth",
+        "formTitle": "Решение риск-офицера",
+        "formDescription": "Форма доступна по отдельному логину и паролю офицера. Баллы и исходные данные берутся только из сохранённой оценки. Просмотрите запись в Data Tables перед решением.",
+        "responseMode": "lastNode",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "ID оценки",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Имя офицера",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Решение",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "REQUEST_DATA"
+                  },
+                  {
+                    "option": "BLOCK"
+                  },
+                  {
+                    "option": "APPROVE"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Обоснование",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Ссылки или номера проверенных документов",
+              "fieldType": "textarea",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Ручная проверка источников завершена",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "НЕТ"
+                  },
+                  {
+                    "option": "ДА"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "path": "marine-risk-officer-v4",
+          "buttonLabel": "Сохранить решение",
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "Запрос обработан. Итог и ID записи доступны в Executions и Data Tables. При ошибке проверьте введённые данные."
+            }
+          }
+        }
+      },
+      "webhookId": "marine-risk-officer-v4"
+    },
+    {
+      "id": "Проверить поля решения офицера",
+      "name": "Проверить поля решения офицера",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        930
+      ],
+      "parameters": {
+        "jsCode": "const b=$input.first().json;const assessment_id=String(b['ID оценки']||'').trim(),officer=String(b['Имя офицера']||'').trim(),decision=String(b['Решение']||''),note=String(b['Обоснование']||'').trim(),evidence=String(b['Ссылки или номера проверенных документов']||'').trim();if(!/^MRR-[\\w-]{1,100}$/.test(assessment_id))throw Error('Неверный ID оценки');if(officer.length<3||officer.length>150||note.length<10||note.length>3000||evidence.length>3000)throw Error('Проверьте имя и обоснование (минимум 10 символов)');if(!['REQUEST_DATA','BLOCK','APPROVE'].includes(decision))throw Error('Неизвестное решение');return [{json:{assessment_id,officer,decision,note,evidence,manual_verified:b['Ручная проверка источников завершена']==='ДА',authenticated_via:'N8N_FORM_BASIC_AUTH',timestamp:new Date().toISOString()}}];"
+      }
+    },
+    {
+      "id": "Журнал: подключение для офицера",
+      "name": "Журнал: подключение для офицера",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        930
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "marine_risk_events_v4",
+        "columns": {
+          "column": [
+            {
+              "name": "assessment_id",
+              "type": "string"
+            },
+            {
+              "name": "record_type",
+              "type": "string"
+            },
+            {
+              "name": "access_token",
+              "type": "string"
+            },
+            {
+              "name": "payload",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "Получить исходную оценку",
+      "name": "Получить исходную оценку",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        730,
+        930
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Журнал: подключение для офицера').first().json.id }}"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "assessment_id",
+              "keyValue": "={{ $('Проверить поля решения офицера').first().json.assessment_id }}",
+              "condition": "eq"
+            },
+            {
+              "keyName": "record_type",
+              "keyValue": "ASSESSMENT",
+              "condition": "eq"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "Проверить основания и полномочия",
+      "name": "Проверить основания и полномочия",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        970,
+        930
+      ],
+      "parameters": {
+        "jsCode": "const d=$('Проверить поля решения офицера').first().json;const rows=$input.all().map(x=>x.json).filter(x=>x.record_type==='ASSESSMENT');if(rows.length!==1)throw Error('Оценка не найдена или ID неоднозначен');const a=JSON.parse(rows[0].payload);if(d.decision==='APPROVE'&&(!d.manual_verified||d.evidence.length<10||d.note.length<30||a.route_info.errors.length))throw Error('Для согласования нужны ручная проверка, документы и обоснование минимум 30 символов. Противоречия ввода не допускаются.');const status={REQUEST_DATA:'MORE_DATA_REQUIRED',BLOCK:'OFFICER_BLOCKED',APPROVE:'OFFICER_APPROVED'}[d.decision];return [{json:{assessment_id:d.assessment_id,record_type:'DECISION',access_token:rows[0].access_token,status,payload:JSON.stringify({...d,status,assessment_row_id:rows[0].id,assessment_timestamp:a.timestamp})}}];"
+      }
+    },
+    {
+      "id": "Сохранить резолюцию офицера",
+      "name": "Сохранить резолюцию офицера",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1220,
+        930
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Журнал: подключение для офицера').first().json.id }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "assessment_id": "={{ $('Проверить основания и полномочия').first().json.assessment_id }}",
+            "record_type": "={{ $('Проверить основания и полномочия').first().json.record_type }}",
+            "access_token": "={{ $('Проверить основания и полномочия').first().json.access_token }}",
+            "payload": "={{ $('Проверить основания и полномочия').first().json.payload }}",
+            "status": "={{ $('Проверить основания и полномочия').first().json.status }}"
+          },
+          "schema": [
+            {
+              "id": "assessment_id",
+              "displayName": "assessment_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "record_type",
+              "displayName": "record_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "access_token",
+              "displayName": "access_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Подтверждение серверной записи",
+      "name": "Подтверждение серверной записи",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        930
+      ],
+      "parameters": {
+        "jsCode": "const row=$input.first().json;if(!row.id)throw Error('Решение не сохранено');const d=$('Проверить основания и полномочия').first().json;return [{json:{assessment_id:d.assessment_id,status:d.status,decision:JSON.parse(d.payload),server_audit:true,audit_row_id:row.id,formSubmittedText:'Решение '+d.status+' для '+d.assessment_id+' сохранено в серверном журнале. В программе нажмите Обновить решение.'}}];"
+      }
+    },
+    {
+      "id": "API: получить сохранённый статус",
+      "name": "API: получить сохранённый статус",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "marine-risk-status",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "marine-risk-status-v4"
+    },
+    {
+      "id": "Проверить ключ просмотра",
+      "name": "Проверить ключ просмотра",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        1300
+      ],
+      "parameters": {
+        "jsCode": "const raw=$input.first().json,b=raw.body||raw;const assessment_id=String(b.assessment_id||''),access_token=String(b.access_token||'');if(!/^MRR-[\\w-]{1,100}$/.test(assessment_id)||!/^[a-f0-9-]{36}$/i.test(access_token))throw Error('Неверный ID или ключ просмотра');return [{json:{assessment_id,access_token}}];"
+      }
+    },
+    {
+      "id": "Журнал: подключение для статуса",
+      "name": "Журнал: подключение для статуса",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        1300
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "marine_risk_events_v4",
+        "columns": {
+          "column": [
+            {
+              "name": "assessment_id",
+              "type": "string"
+            },
+            {
+              "name": "record_type",
+              "type": "string"
+            },
+            {
+              "name": "access_token",
+              "type": "string"
+            },
+            {
+              "name": "payload",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "Получить события по ключу",
+      "name": "Получить события по ключу",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        730,
+        1300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Журнал: подключение для статуса').first().json.id }}"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "assessment_id",
+              "keyValue": "={{ $('Проверить ключ просмотра').first().json.assessment_id }}",
+              "condition": "eq"
+            },
+            {
+              "keyName": "access_token",
+              "keyValue": "={{ $('Проверить ключ просмотра').first().json.access_token }}",
+              "condition": "eq"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "Вернуть актуальный статус",
+      "name": "Вернуть актуальный статус",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        970,
+        1300
+      ],
+      "parameters": {
+        "jsCode": "const rows=$input.all().map(x=>x.json).filter(x=>x.id);const a=rows.find(x=>x.record_type==='ASSESSMENT');if(!a)return [{json:{error:'NOT_FOUND',status:'NOT_FOUND'}}];const decisions=rows.filter(x=>x.record_type==='DECISION').sort((a,b)=>Number(b.id)-Number(a.id));const assessment=JSON.parse(a.payload);const d=decisions[0];return [{json:{assessment_id:a.assessment_id,request_id:assessment.request_id,imo:assessment.imo,status:d?d.status:'AWAITING_OFFICER',decision:d?JSON.parse(d.payload):null,server_audit:true,audit_row_id:d?.id||a.id,decision_count:decisions.length}}];"
+      }
+    },
+    {
+      "id": "Контроль полноты и готовности к ревью",
+      "name": "Контроль полноты и готовности к ревью",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1390,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const r=$input.first().json;r.data_completeness={weather:r.weather.live?'AVAILABLE':'UNKNOWN',ais:'NOT_CONNECTED',sanctions_registry:'NOT_CONNECTED',route:r.route_info.corridor?'CATALOG_CORRIDOR':'MANUAL_REVIEW_REQUIRED'};r.review_priority=r.level==='RED'?'URGENT':'STANDARD';return [{json:r}];"
+      }
+    }
+  ],
+  "connections": {
+    "Демо: Запуск в 1 клик": {
+      "main": [
+        [
+          {
+            "node": "Выбор демо-сценария",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Выбор демо-сценария": {
+      "main": [
+        [
+          {
+            "node": "Валидация IMO и нормализация",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Веб-форма: Проверка рейса": {
+      "main": [
+        [
+          {
+            "node": "Валидация IMO и нормализация",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Внешний API / Веб-терминал": {
+      "main": [
+        [
+          {
+            "node": "Валидация IMO и нормализация",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Валидация IMO и нормализация": {
+      "main": [
+        [
+          {
+            "node": "Данные согласованы?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Данные согласованы?": {
+      "main": [
+        [
+          {
+            "node": "Погода: Open-Meteo Marine",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ошибка входных данных",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Погода: Open-Meteo Marine": {
+      "main": [
+        [
+          {
+            "node": "Единый расчёт риска v3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Единый расчёт риска v3": {
+      "main": [
+        [
+          {
+            "node": "Контроль полноты и готовности к ревью",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ИИ-Аналитик: Синтез риска (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Карточка: Итоговый отчет аудита",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Карточка: Итоговый отчет аудита": {
+      "main": [
+        [
+          {
+            "node": "Безопасный ключ просмотра",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Безопасный ключ просмотра": {
+      "main": [
+        [
+          {
+            "node": "Пакет оценки для журнала",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пакет оценки для журнала": {
+      "main": [
+        [
+          {
+            "node": "Подготовить серверный журнал",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовить серверный журнал": {
+      "main": [
+        [
+          {
+            "node": "Сохранить оценку в n8n",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохранить оценку в n8n": {
+      "main": [
+        [
+          {
+            "node": "Вернуть сохранённую оценку программе",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Офицер: защищённая форма решения": {
+      "main": [
+        [
+          {
+            "node": "Проверить поля решения офицера",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверить поля решения офицера": {
+      "main": [
+        [
+          {
+            "node": "Журнал: подключение для офицера",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Журнал: подключение для офицера": {
+      "main": [
+        [
+          {
+            "node": "Получить исходную оценку",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получить исходную оценку": {
+      "main": [
+        [
+          {
+            "node": "Проверить основания и полномочия",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверить основания и полномочия": {
+      "main": [
+        [
+          {
+            "node": "Сохранить резолюцию офицера",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохранить резолюцию офицера": {
+      "main": [
+        [
+          {
+            "node": "Подтверждение серверной записи",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API: получить сохранённый статус": {
+      "main": [
+        [
+          {
+            "node": "Проверить ключ просмотра",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверить ключ просмотра": {
+      "main": [
+        [
+          {
+            "node": "Журнал: подключение для статуса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Журнал: подключение для статуса": {
+      "main": [
+        [
+          {
+            "node": "Получить события по ключу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получить события по ключу": {
+      "main": [
+        [
+          {
+            "node": "Вернуть актуальный статус",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Контроль полноты и готовности к ревью": {
+      "main": [
+        [
+          {
+            "node": "ИИ-Аналитик: Синтез риска (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "pinData": {}
+}

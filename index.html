@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Marine Risk Radar — Enterprise Terminal</title>
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚢</text></svg>">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#131b2e',
+                            900: '#0f172a',
+                            950: '#0a0f1d',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Smooth, minimalist scrollbars */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #25334d;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3b82f6;
+        }
+
+        /* Clean Leaflet Map styling with CSS dark inversion on OSM */
+        .leaflet-container {
+            background: #0d1527 !important;
+            font-family: 'Plus Jakarta Sans', sans-serif !important;
+        }
+        .dark .map-tiles-dark {
+            filter: brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.35);
+        }
+        .leaflet-popup-content-wrapper {
+            background: #0f172a !important;
+            color: #f8fafc !important;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .leaflet-popup-tip {
+            background: #0f172a !important;
+        }
+
+        /* Subtle glass panels */
+        .panel {
+            background: #0d1527;
+            border: 1px solid #1e293b;
+        }
+
+        /* Tooltips */
+        .tip {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted #64748b;
+        }
+        .tip:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #020617;
+            color: #e2e8f0;
+            padding: 5px 9px;
+            border-radius: 6px;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 100;
+            border: 1px solid #334155;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            pointer-events: none;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 500;
+        }
+
+        @media print {
+            .no-print, header, #emptyStatePlaceholder, #btnSubmitAssessment { display: none !important; }
+            body { 
+                background: #ffffff !important; 
+                color: #0f172a !important; 
+                font-family: 'Plus Jakarta Sans', sans-serif !important;
+                padding: 10px !important;
+            }
+            main {
+                display: block !important;
+                max-width: 100% !important;
+                padding: 0 !important;
+            }
+            section {
+                width: 100% !important;
+            }
+            .panel { 
+                border: 1px solid #cbd5e1 !important; 
+                background: #ffffff !important; 
+                box-shadow: none !important;
+                color: #0f172a !important;
+                page-break-inside: avoid;
+            }
+            #verdictBanner {
+                background: #f8fafc !important;
+                border: 2px solid #0f172a !important;
+                color: #0f172a !important;
+                page-break-inside: avoid;
+            }
+            #totalRiskScore {
+                color: #0f172a !important;
+            }
+            #map {
+                height: 220px !important;
+                filter: grayscale(0.2);
+            }
+            table th, table td {
+                color: #0f172a !important;
+                border-color: #e2e8f0 !important;
+            }
+            .tab-btn { display: none !important; }
+            #tabContent-matrix, #tabContent-economics, #tabContent-hitl, #tabContent-audit {
+                display: block !important;
+                margin-top: 15px !important;
+                border-top: 1px solid #e2e8f0 !important;
+                padding-top: 15px !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+
+    <!-- ===================================================================== -->
+    <!-- 1. TOP BAR (Минималистичная шапка) -->
+    <!-- ===================================================================== -->
+    <header class="bg-slate-900/90 border-b border-slate-800/80 px-5 py-3 sticky top-0 z-30 backdrop-blur-md">
+        <div class="max-w-[1700px] mx-auto flex flex-wrap items-center justify-between gap-4">
+            
+            <!-- Logo & System Status -->
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm tracking-tight text-white">AI MARINE RISK RADAR</span>
+                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Проверка офицером
+                        </span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Подготовка оценки рейса для риск-офицера</p>
+                </div>
+            </div>
+
+            <div class="text-xs text-amber-300">Сценарная оценка • Котировки, санкционные реестры и AIS не подключены</div><!-- Right Controls -->
+            <div class="flex items-center gap-2">
+                <button onclick="window.print()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center gap-1.5">
+                    <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                    <span>Печать / PDF</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===================================================================== -->
+    <!-- 2. MAIN WORKSPACE (Лаконичный 2-колоночный лейаут) -->
+    <!-- ===================================================================== -->
+    <main class="flex-1 max-w-[1700px] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- LEFT COLUMN: Voyage Configurator (lg:col-span-4) -->
+        <section class="lg:col-span-4 flex flex-col gap-4">
+            
+            <div class="panel rounded-xl p-5 shadow-lg flex flex-col">
+                <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+                    <h2 class="font-bold text-xs uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                        <i data-lucide="sliders-horizontal" class="w-4 h-4 text-blue-400"></i>
+                        Параметры рейса танкера
+                    </h2>
+                    <span class="text-[10px] text-slate-400 font-mono">Конфигуратор</span>
+                </div>
+
+                <form id="voyageForm" onsubmit="event.preventDefault(); evaluateVoyageRisk();" class="space-y-4 text-xs">
+                    
+                    <!-- IMO Number & Real-time Mod-10 Check -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="font-semibold text-slate-300">IMO номер судна (7 цифр) *</label>
+                            <span id="imoValidationBadge" class="font-mono text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                                Проверка mod 10...
+                            </span>
+                        </div>
+                        <input type="text" id="inputImo" value="9456783" maxlength="7" oninput="handleImoInput(this.value)"
+                            class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 font-mono tracking-wider text-sm transition-all outline-none"
+                            placeholder="например, 9456783">
+                    </div>
+
+                    <!-- Vessel Name & Price -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-semibold text-slate-300 mb-1.5">Название танкера *</label>
+                        <input type="text" id="inputVessel" value="DESERT PHOENIX" maxlength="80" required
+                                class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 text-xs transition-all outline-none">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+                                <span>Цена нефти ($/bbl) *</span>
+                                
+                            </label>
+                            <input type="number" id="inputPrice" value="59.80" step="0.10" min="10" max="200"
+                                class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 font-mono font-semibold text-xs transition-all outline-none">
+                        </div>
+                    </div>
+
+                    <!-- Destination Country / Buyer -->
+                    <div>
+                        <label class="block font-semibold text-slate-300 mb-1.5">Страна назначения / Покупатель *</label>
+                        <select id="inputCountry" class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 text-xs transition-all outline-none">
+                            <option value="Индия (НПЗ Reliance / IOCL / Vadinar)">Индия (НПЗ Reliance / IOCL / Vadinar)</option>
+                            <option value="Китай (НПЗ Sinopec / PetroChina / Rizhao)">Китай (НПЗ Sinopec / PetroChina / Rizhao)</option>
+                            <option value="Турция (НПЗ STAR / Aliaga)">Турция (НПЗ STAR / Aliaga)</option>
+                            <option value="ОАЭ / Нейтральные воды (STS перевалка)">ОАЭ / Нейтральные воды (STS перевалка)</option>
+                            <option value="ЕС / G7 (Западная юрисдикция)">ЕС / G7 (Западная юрисдикция — жесткий потолок $60)</option>
+                        </select>
+                    </div>
+
+                    <!-- Ports / Route -->
+                    <div>
+                        <label class="block font-semibold text-slate-300 mb-1.5">Маршрут следования (Порты) *</label>
+                        <input type="text" id="inputRoute" value="Новороссийск -> Мундра (Индия)" maxlength="160" required
+                            class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 text-xs transition-all outline-none">
+                    </div>
+
+                    <!-- Chokepoint Dropdown -->
+                    <div>
+                        <label class="block font-semibold text-slate-300 mb-1.5">Критический пролив / опасная зона *</label>
+                        <select id="inputChokepoint" onchange="handleChokepointSelect(this.value)" class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 text-xs transition-all outline-none">
+                            <option value="Красное море / Баб-эль-Мандебский пролив (Военная зона)">Красное море / Баб-эль-Мандебский пролив (Военная зона)</option>
+                            <option value="Ормузский пролив (Иран / Риск задержания)">Ормузский пролив (Иран / Риск задержания)</option>
+                            <option value="Босфор и Дарданеллы (Турция / Ограничения осадки)">Босфор и Дарданеллы (Турция / Ограничения UKC)</option>
+                            <option value="Малаккский и Сингапурский проливы (Азия / Пиратство)">Малаккский и Сингапурский проливы (Азия)</option>
+                            <option value="Восточно-Китайское море">Восточно-Китайское море</option><option value="Тайваньский пролив">Тайваньский пролив</option>
+                            <option value="Лаконский залив / STS Перевалка в море">Лаконский залив / STS Перевалка в море</option>
+                            <option value="Балтийские проливы (Датские проливы / Storebælt)">Балтийские проливы (Storebælt)</option>
+                            <option value="Мыс Доброй Надежды (Безопасный обход Африки)">Мыс Доброй Надежды (Безопасный обход Африки)</option>
+                            <option value="Гибралтарский пролив (Вход в Средиземное море)">Гибралтарский пролив</option>
+                            <option value="Суэцкий канал (Египет / Очереди и тарифы)">Суэцкий канал</option>
+                            <option value="Свой вариант / Другой маршрут">Свой вариант (укажите в поле ниже)</option>
+                        </select>
+                    </div>
+
+                    <!-- Multi-Chokepoint Manual Input -->
+                    <div>
+                        <label class="block font-semibold text-slate-300 mb-1.5">Цепочка проливов через запятую</label>
+                        <input type="text" id="inputManualChokepoints" value="Босфор, Суэцкий канал, Баб-эль-Мандеб"
+                            class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs transition-all outline-none">
+                    </div>
+
+                    <!-- Primary Action Button -->
+                    <div class="pt-2">
+                        <button type="submit" id="btnSubmitAssessment"
+                            class="w-full py-3 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2">
+                            <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+                            <span>ОЦЕНИТЬ РИСК РЕЙСА</span>
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+        </section>
+
+        <!-- RIGHT COLUMN: Geospatial Map, Risk Verdict & Deep Dive Tabs (lg:col-span-8) -->
+        <section class="lg:col-span-8 flex flex-col gap-4">
+            
+            <!-- EMPTY STATE (Показывается при загрузке до первого нажатия кнопки) -->
+            <div id="emptyStatePlaceholder" class="panel rounded-xl p-12 text-center flex flex-col items-center justify-center min-h-[520px] shadow-lg">
+                <div class="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-4">
+                    <i data-lucide="compass" class="w-8 h-8"></i>
+                </div>
+                <h3 class="text-base font-bold text-slate-100 mb-2">Терминал готов к оценке рейса</h3>
+                <p class="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+                    Заполните параметры танкера, цену нефти и проливы слева, затем нажмите <span class="text-blue-400 font-semibold">«ОЦЕНИТЬ РИСК РЕЙСА»</span> для запуска конвейера аналитики.
+                </p>
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Запрос к n8n и Open-Meteo при запуске</span>
+                </div>
+            </div>
+
+            <!-- RESULTS CONTAINER (Появляется только после нажатия кнопки «Оценить риск») -->
+            <div id="resultsContainer" class="hidden flex flex-col gap-4">
+                
+                <!-- MODULE 2: INTERACTIVE MARINE MAP -->
+                <div class="panel rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    
+                    <!-- Map Header & Open-Meteo Widget -->
+                    <div class="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div class="flex items-center gap-3">
+                            <span class="font-semibold text-slate-200 flex items-center gap-1.5 text-xs">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-blue-400"></i>
+                                Схема выбранного коридора
+                            </span>
+                            <div class="flex items-center gap-2.5 text-[11px] font-mono text-slate-400">
+                                <span class="inline-flex items-center gap-1 text-red-400"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> Сценарный риск</span>
+                                <span class="inline-flex items-center gap-1 text-red-400"><span class="w-3 h-0.5 bg-red-500 inline-block"></span> Коридор</span>
+                                <span class="inline-flex items-center gap-1 text-amber-400"><span class="w-3 h-0.5 border-b border-dashed border-amber-400 inline-block"></span> Схематичная линия</span>
+                            </div>
+                        </div>
+
+                        <!-- Live Hydro-meteorology telemetry -->
+                        <div id="weatherWidget" class="flex items-center gap-2.5 font-mono text-[11px] text-slate-300">
+                            <div class="flex items-center gap-1 text-cyan-400">
+                                <i data-lucide="waves" class="w-3.5 h-3.5"></i>
+                                <span id="liveWaveHeight">-- м</span>
+                            </div>
+                            <span class="text-slate-700">•</span>
+                            <div class="flex items-center gap-1 text-blue-400">
+                                <i data-lucide="wind" class="w-3.5 h-3.5"></i>
+                                <span id="liveCurrentSpeed">-- м/с</span>
+                            </div>
+                            <span class="text-slate-700">•</span>
+                            <span id="weatherZoneLabel" class="text-slate-400 font-sans text-[11px]">Ожидание расчета</span>
+                        </div>
+                    </div>
+
+                    <!-- Leaflet Canvas -->
+                    <div id="map" class="w-full h-[290px] relative z-0"></div>
+                    <div class="px-4 py-1.5 bg-slate-950 border-t border-slate-800 text-[10px] text-slate-500 font-sans">
+                        Сценарная схема морских коридоров для оценки риска; не предназначена для навигации или прокладки реального рейса.
+                    </div>
+                </div>
+
+                <!-- MODULE 3: EXECUTIVE RISK VERDICT BANNER -->
+                <div id="verdictBanner" class="rounded-xl p-4 border transition-all duration-300 flex flex-wrap items-center justify-between gap-4 bg-slate-900 border-red-500/40 shadow-lg">
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2">
+                            <span id="verdictPill" class="px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1.5">
+                                <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+                                <span>РАСЧЕТ ВЕРДИКТА...</span>
+                            </span>
+                            <span id="wormShortBadge" class="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                WORM: --
+                            </span>
+                        </div>
+                        <h3 id="verdictTitle" class="text-base lg:text-lg font-bold text-white">
+                            Оценка параметров безопасности...
+                        </h3>
+                        <p id="verdictSubtitle" class="text-xs text-slate-400">
+                            Танкер <span id="resVesselName" class="font-mono font-semibold text-slate-200">--</span> (IMO <span id="resImo" class="font-mono text-slate-200">--</span>) • <span id="resRoute" class="text-slate-300">--</span>
+                        </p>
+                    </div>
+
+                    <!-- Score indicator -->
+                    <div class="flex items-center gap-4">
+                        <div class="text-right">
+                            <div class="text-[10px] font-semibold uppercase text-slate-400">Индекс риска</div>
+                            <div class="text-[11px] text-red-400 font-mono" id="dominanceStatusLabel">--</div>
+                        </div>
+                        <div class="w-14 h-14 rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center">
+                            <span id="totalRiskScore" class="font-mono font-extrabold text-xl text-red-400">--</span>
+                            <span class="text-[9px] font-mono text-slate-500">/ 100</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABS SECTION: 4 VIEWS -->
+                <div class="panel rounded-xl flex flex-col shadow-lg">
+                    <!-- Tab Headers -->
+                    <div class="flex items-center border-b border-slate-800 px-4 pt-2 gap-1 overflow-x-auto text-xs font-semibold">
+                        <button onclick="switchTab('matrix')" id="tabBtn-matrix" class="tab-btn active px-3 py-2 rounded-t-lg border-b-2 border-blue-500 text-blue-400 bg-slate-900/60 flex items-center gap-1.5 transition-all">
+                            <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i>
+                            <span>1. Матрица рисков</span>
+                        </button>
+                        <button onclick="switchTab('economics')" id="tabBtn-economics" class="tab-btn px-3 py-2 rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-all">
+                            <i data-lucide="dollar-sign" class="w-3.5 h-3.5"></i>
+                            <span>2. Экономика маршрутов</span>
+                        </button>
+                        <button onclick="switchTab('hitl')" id="tabBtn-hitl" class="tab-btn px-3 py-2 rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-all">
+                            <i data-lucide="user-check" class="w-3.5 h-3.5"></i>
+                            <span>3. Решение риск-офицера</span>
+                        </button>
+                        <button onclick="switchTab('audit')" id="tabBtn-audit" class="tab-btn px-3 py-2 rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-all">
+                            <i data-lucide="history" class="w-3.5 h-3.5"></i>
+                            <span>4. Журнал аудита (<span id="auditCountBadge">0</span>)</span>
+                        </button>
+                    </div>
+
+                <!-- TAB 1: RISK MATRIX & SPIDER RADAR CHART -->
+                <div id="tabContent-matrix" class="p-4 grid grid-cols-1 md:grid-cols-12 gap-5">
+                    <div class="md:col-span-7">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
+                                    <th class="pb-2 font-semibold">Ось риска</th>
+                                    <th class="pb-2 font-semibold">Параметры</th>
+                                    <th class="pb-2 font-semibold text-center">Оценка</th>
+                                    <th class="pb-2 font-semibold text-right">Статус</th>
+                                </tr>
+                            </thead>
+                            <tbody id="riskMatrixTableBody" class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="md:col-span-5 flex flex-col items-center justify-center p-2 bg-slate-950/60 rounded-lg border border-slate-800">
+                        <div class="w-full h-[180px] relative">
+                            <canvas id="riskRadarChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: ROUTE ECONOMICS -->
+                <div id="tabContent-economics" class="hidden p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                            <div class="text-[10px] uppercase font-mono text-slate-400">Прямой ход (Суэц)</div>
+                            <div class="text-lg font-mono font-bold text-white mt-1">18 суток</div>
+                            <div class="text-[11px] text-red-400 font-mono">Военная премия: $240,000</div>
+                        </div>
+                        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                            <div class="text-[10px] uppercase font-mono text-slate-400">Обход Африки (Мыс Надежды)</div>
+                            <div class="text-lg font-mono font-bold text-emerald-400 mt-1">31 сутки (+13 дней)</div>
+                            <div class="text-[11px] text-emerald-400 font-mono">Премия: $0 (Экономия 100%)</div>
+                        </div>
+                        <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                            <div class="text-[10px] uppercase font-mono text-slate-400">Оценка сохранности груза</div>
+                            <div class="text-lg font-mono font-bold text-blue-300 mt-1">$60,000,000</div>
+                            <div class="text-[11px] text-slate-400 font-sans">1 млн баррелей нефти</div>
+                        </div>
+                    </div>
+
+                    <table class="w-full text-left text-xs border border-slate-800 rounded-lg overflow-hidden">
+                        <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[10px]">
+                            <tr>
+                                <th class="py-2.5 px-3">Статья расходов</th>
+                                <th class="py-2.5 px-3">Прямой (Суэц)</th>
+                                <th class="py-2.5 px-3 text-emerald-400">Обход Африки</th>
+                                <th class="py-2.5 px-3 text-right">Дельта</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono text-[11px]">
+                            <tr>
+                                <td class="py-2.5 px-3 font-sans text-slate-300">Военная страховая премия</td>
+                                <td class="py-2.5 px-3 text-red-400 font-semibold" id="econDirectWar">$240,000</td>
+                                <td class="py-2.5 px-3 text-emerald-400 font-semibold">$0</td>
+                                <td class="py-2.5 px-3 text-right text-emerald-400">-$240,000 (Экономия)</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2.5 px-3 font-sans text-slate-300">Топливо VLSFO ($620/т)</td>
+                                <td class="py-2.5 px-3 text-slate-300">$390,600 (630 т)</td>
+                                <td class="py-2.5 px-3 text-amber-300 font-semibold" id="econCapeFuel">+$282,100 (455 т)</td>
+                                <td class="py-2.5 px-3 text-right text-amber-400">+$282,100</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2.5 px-3 font-sans text-slate-300">Демередж ($38k/сут)</td>
+                                <td class="py-2.5 px-3 text-slate-400">$0</td>
+                                <td class="py-2.5 px-3 text-amber-300 font-semibold" id="econCapeDemurrage">+$494,000 (13 сут)</td>
+                                <td class="py-2.5 px-3 text-right text-amber-400">+$494,000</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- TAB 3: HITL RESOLUTION -->
+                <div id="tabContent-hitl" class="hidden p-4 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-2.5">
+                        <button onclick="submitOfficerResolution('STANDARD_APPROVED')" class="p-2.5 rounded-lg bg-slate-900 hover:bg-emerald-950/40 border border-slate-700 hover:border-emerald-500 text-left transition-all">
+                            <div class="text-emerald-400 font-bold text-xs">✅ Согласовать рейс</div>
+                            <p class="text-[10px] text-slate-400 mt-0.5 font-sans">Штатный рейс, низкий профиль риска.</p>
+                        </button>
+                        <button onclick="submitOfficerResolution('REROUTE_APPROVED')" class="p-2.5 rounded-lg bg-slate-900 hover:bg-emerald-950/40 border border-slate-700 hover:border-emerald-500 text-left transition-all">
+                            <div class="text-emerald-400 font-bold text-xs">🌍 Утвердить обход Африки</div>
+                            <p class="text-[10px] text-slate-400 mt-0.5 font-sans">Мыс Надежды (+13 сут). Без риска атак.</p>
+                        </button>
+                        <button onclick="submitOfficerResolution('DIRECT_AUTHORIZED')" class="p-2.5 rounded-lg bg-slate-900 hover:bg-amber-950/40 border border-slate-700 hover:border-amber-500 text-left transition-all">
+                            <div class="text-amber-400 font-bold text-xs">⚠️ Прямой ход + Премия</div>
+                            <p class="text-[10px] text-slate-400 mt-0.5 font-sans">Оплата военной страховки ($240k).</p>
+                        </button>
+                        <button onclick="submitOfficerResolution('SECURITY_BLOCK')" class="p-2.5 rounded-lg bg-slate-900 hover:bg-red-950/40 border border-slate-700 hover:border-red-500 text-left transition-all">
+                            <div class="text-red-400 font-bold text-xs">⛔ Заблокировать рейс</div>
+                            <p class="text-[10px] text-slate-400 mt-0.5 font-sans">Запрет выхода судна из порта.</p>
+                        </button>
+                    </div>
+
+                    <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2.5 text-xs">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-300 mb-1">Риск-офицер:</label>
+                                <input type="text" id="officerNameInput" value="Главный риск-офицер (ID #7401)" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono text-xs outline-none">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-300 mb-1">Комментарий к резолюции:</label>
+                                <input type="text" id="officerNoteInput" value="Угроза БПЛА в Баб-эль-Мандебе. Назначен обход Африки." class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 text-xs outline-none">
+                            </div>
+                        </div>
+
+                        <div class="p-2 rounded bg-slate-900 border border-dashed border-slate-700 flex items-center justify-between font-mono text-[11px]">
+                            <div>
+                                <span class="text-slate-400 font-sans text-[10px]">ID оценки: </span>
+                                <span id="fullWormSignature" class="text-emerald-400 font-bold select-all">—</span>
+                            </div>
+                            <button onclick="copyWormSignature()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-sans">Копировать</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: AUDIT TRAIL LOG -->
+                <div id="tabContent-audit" class="hidden p-4 space-y-3">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-400">Журнал прогнозов и локальных решений (хранится в сессии):</span>
+                        <button onclick="clearAuditHistory()" class="text-[11px] text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1">
+                            <i data-lucide="trash-2" class="w-3 h-3"></i>
+                            <span>Очистить журнал</span>
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto border border-slate-800 rounded-lg max-h-[220px] overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] sticky top-0">
+                                <tr>
+                                    <th class="py-2 px-3">Время</th>
+                                    <th class="py-2 px-3">Танкер (IMO)</th>
+                                    <th class="py-2 px-3">Маршрут</th>
+                                    <th class="py-2 px-3 text-center">Риск</th>
+                                    <th class="py-2 px-3">Решение / Статус</th>
+                                    <th class="py-2 px-3 text-right">ID оценки</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditTableBody" class="divide-y divide-slate-800 font-mono text-[11px]">
+                                <tr>
+                                    <td colspan="6" class="py-4 text-center text-slate-500 font-sans">
+                                        В текущей сессии еще не сохранено решений.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- MODULE 4: EXPORT ACTIONS -->
+            <div class="panel rounded-xl p-3 flex items-center justify-between text-xs">
+                <span class="text-slate-400">Экспорт результатов проверки:</span>
+                <div class="flex items-center gap-2">
+                    <button onclick="downloadJsonPassport()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors flex items-center gap-1.5">
+                        <i data-lucide="file-code" class="w-3.5 h-3.5 text-blue-400"></i>
+                        <span>JSON Паспорт</span>
+                    </button>
+                    <button onclick="window.print()" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center gap-1.5">
+                        <i data-lucide="file-check" class="w-3.5 h-3.5"></i>
+                        <span>Отчёт (PDF)</span>
+                    </button>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Toast -->
+    <div id="toastNotification" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 border border-slate-700 shadow-2xl rounded-lg p-3 text-xs text-white flex items-center gap-2 max-w-sm">
+        <i id="toastIcon" data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+        <span id="toastMessage">Уведомление</span>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- 3. JAVASCRIPT ENGINE -->
+    <!-- ===================================================================== -->
+    <script>
+        let currentAssessment = null;
+        let auditHistory = [];
+        let leafletMap = null;
+        let mapLayers = {
+            directRoute: null,
+            capeRoute: null,
+            hazardCircles: [],
+            corridorMarkers: [],
+            vesselMarker: null
+        };
+        let radarChartInstance = null;
+
+        // 1. IMO Mod-10 Validation
+        function validateImoMod10(imo) {
+            const str = String(imo).trim();
+            if (!/^\d{7}$/.test(str)) return false;
+            const digits = str.split('').map(Number);
+            const sum = digits.slice(0, 6).reduce((acc, d, i) => acc + d * (7 - i), 0);
+            return (sum % 10) === digits[6];
+        }
+
+        function handleImoInput(val) {
+            const badge = document.getElementById('imoValidationBadge');
+            if (!val || val.length < 7) {
+                badge.className = 'font-mono text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400';
+                badge.textContent = `Введено ${val.length}/7 цифр`;
+                return;
+            }
+            if (validateImoMod10(val)) {
+                badge.className = 'font-mono text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+                badge.textContent = '✓ IMO валиден (mod 10)';
+            } else {
+                badge.className = 'font-mono text-[10px] font-semibold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30';
+                badge.textContent = '✗ Неверная цифра IMO';
+            }
+        }
+
+        function clearFieldError(field) {
+            field.removeAttribute('aria-invalid');
+            field.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
+        }
+
+        function markFieldError(field, message) {
+            field.setAttribute('aria-invalid', 'true');
+            field.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+            field.focus();
+            showToast(`Ошибка ввода: ${message}`, 'error');
+            return false;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>'"]/g, char => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            })[char]);
+        }
+
+        function isValidAuditEntry(entry) {
+            return entry && typeof entry === 'object'
+                && typeof entry.id === 'string' && typeof entry.timestamp === 'string'
+                && typeof entry.vessel === 'string' && typeof entry.imo === 'string'
+                && typeof entry.route === 'string' && Number.isFinite(entry.totalRisk)
+                && typeof entry.decision === 'string' && typeof entry.wormHash === 'string';
+        }
+
+        async function dispatchToN8n(payload) {
+            const prodUrl = 'https://lavrik.app.n8n.cloud/webhook/marine-risk-voyage-check';
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            try {
+                // application/x-www-form-urlencoded is a CORS-safelisted request.
+                // It lets n8n receive an object without relying on no-cors mode.
+                const response = await fetch(prodUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body: new URLSearchParams(Object.entries(payload).map(([key, value]) => [key, String(value ?? '') ])),
+                    signal: controller.signal
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                if (!result || typeof result !== 'object' || String(result.imo || '') !== String(payload.imo)) {
+                    throw new Error('Ответ n8n не содержит подтверждения для отправленного IMO');
+                }
+                return result;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        // 2. Weather Engine
+        function renderImoValidationError(imo, vessel) {
+            const banner = document.getElementById('verdictBanner');
+            const pill = document.getElementById('verdictPill');
+            const title = document.getElementById('verdictTitle');
+            const scoreEl = document.getElementById('totalRiskScore');
+            const dominanceLabel = document.getElementById('dominanceStatusLabel');
+
+            document.getElementById('resVesselName').textContent = vessel || 'НЕИЗВЕСТНОЕ СУДНО';
+            document.getElementById('resImo').textContent = imo || 'НЕВАЛИДНЫЙ IMO';
+            document.getElementById('resRoute').textContent = 'Шлюз валидации остановлен';
+            document.getElementById('wormShortBadge').textContent = 'STATUS: VALIDATION_FAILED';
+            scoreEl.textContent = '100';
+
+            banner.className = 'rounded-xl p-4 border transition-all duration-300 flex flex-wrap items-center justify-between gap-4 bg-slate-900 border-red-500/80 shadow-2xl';
+            pill.className = 'px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/50 flex items-center gap-1.5';
+            pill.innerHTML = '<i data-lucide="shield-alert" class="w-3.5 h-3.5"></i> ⛔ ОШИБКА ПРЕ-ВАЛИДАЦИИ: НЕДЕЙСТВИТЕЛЬНЫЙ ИМО';
+            title.textContent = `Алгоритмический шлюз заблокировал рейс: IMO "${imo}" (введено ${imo.length} цифр) не проходит контрольную сумму mod 10`;
+            scoreEl.className = 'font-mono font-extrabold text-xl text-red-500';
+            dominanceLabel.textContent = 'IMO Check Failed';
+            dominanceLabel.className = 'text-[11px] text-red-400 font-mono';
+
+            const tbody = document.getElementById('riskMatrixTableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="py-6 text-center text-red-400 font-sans text-xs space-y-2">
+                        <div class="font-bold text-sm">❌ Ошибка идентификации судна в реестре IMO</div>
+                        <div class="text-slate-400">Международный номер IMO состоит ровно из 7 цифр. 7-я цифра рассчитывается как остаток от деления взвешенной суммы первых 6 цифр на 10: <span class="font-mono text-slate-300">(d1*7 + d2*6 + d3*5 + d4*4 + d5*3 + d6*2) % 10 == d7</span>.</div>
+                        <div class="text-amber-400 mt-2 font-semibold">Рейс остановлен на этапе пре-валидации. Введите корректный 7-значный номер IMO для продолжения оценки.</div>
+                    </td>
+                </tr>
+            `;
+            lucide.createIcons();
+        }
+
+        function initMap() {
+            leafletMap = L.map('map', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView([20.0, 55.0], 3);
+
+            // OpenFreeMap's Natural Earth raster tiles do not require an API key.
+            L.tileLayer('https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png', {
+                maxZoom: 8,
+                attribution: '&copy; OpenFreeMap, Natural Earth'
+            }).addTo(leafletMap);
+        }
+
+        function switchTab(tabId) {
+            ['matrix', 'economics', 'hitl', 'audit'].forEach(t => {
+                document.getElementById(`tabContent-${t}`).classList.add('hidden');
+                document.getElementById(`tabBtn-${t}`).className = 'tab-btn px-3 py-2 rounded-t-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-all';
+            });
+            document.getElementById(`tabContent-${tabId}`).classList.remove('hidden');
+            document.getElementById(`tabBtn-${tabId}`).className = 'tab-btn active px-3 py-2 rounded-t-lg border-b-2 border-blue-500 text-blue-400 bg-slate-900/60 flex items-center gap-1.5 transition-all';
+        }
+
+        function loadAuditHistory() {
+            try {
+                const stored = localStorage.getItem('marine_risk_audit_trail');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (!Array.isArray(parsed)) throw new Error('Неверный формат журнала');
+                    auditHistory = parsed.filter(isValidAuditEntry).slice(0, 50);
+                    if (auditHistory.length !== parsed.length) {
+                        showToast('Часть повреждённых записей журнала пропущена.', 'info');
+                    }
+                }
+            } catch (e) {
+                auditHistory = [];
+                showToast('Не удалось прочитать локальный журнал: он будет создан заново.', 'error');
+            }
+            renderAuditTable();
+        }
+
+        function saveAuditHistory() {
+            try {
+                localStorage.setItem('marine_risk_audit_trail', JSON.stringify(auditHistory));
+            } catch (e) {
+                console.error('Ошибка сохранения локального журнала:', e);
+                showToast('Не удалось сохранить журнал в браузере. Данные останутся только в текущем сеансе.', 'error');
+            }
+            renderAuditTable();
+        }
+
+        function clearAuditHistory() {
+            if (!auditHistory.length) {
+                showToast('Журнал уже пуст.', 'info');
+                return;
+            }
+            if (!window.confirm('Очистить локальный журнал прогнозов? Действие нельзя отменить.')) return;
+            auditHistory = [];
+            try {
+                localStorage.removeItem('marine_risk_audit_trail');
+            } catch (e) {
+                console.error('Ошибка очистки локального журнала:', e);
+                showToast('Журнал очищен только в текущем окне: браузер не дал удалить локальную копию.', 'error');
+            }
+            renderAuditTable();
+            showToast('Журнал прогнозов очищен', 'info');
+        }
+
+        function renderAuditTable() {
+            const tbody = document.getElementById('auditTableBody');
+            const badge = document.getElementById('auditCountBadge');
+            if (badge) badge.textContent = auditHistory.length;
+            
+            if (!auditHistory.length) {
+                tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-slate-500 font-sans">В журнале еще нет сохраненных прогнозов. Нажмите «ОЦЕНИТЬ РИСК РЕЙСА».</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = auditHistory.map(r => `
+                <tr class="hover:bg-slate-900/40">
+                    <td class="py-2 px-3 text-slate-400">${escapeHtml(r.timestamp)}</td>
+                    <td class="py-2 px-3 font-semibold text-slate-200">${escapeHtml(r.vessel)} (${escapeHtml(r.imo)})</td>
+                    <td class="py-2 px-3 text-slate-300 font-sans">${escapeHtml(r.route)}</td>
+                    <td class="py-2 px-3 text-center font-bold ${r.totalRisk >= 65 ? 'text-red-400' : 'text-emerald-400'}">${r.totalRisk}/100</td>
+                    <td class="py-2 px-3 text-slate-200">${escapeHtml(r.decision)}</td>
+                    <td class="py-2 px-3 text-right text-emerald-400 select-all">${escapeHtml(r.wormHash.substring(0, 16))}...</td>
+                </tr>
+            `).join('');
+        }
+
+        function downloadJsonPassport() {
+            if (!currentAssessment) return;
+            const blob = new Blob([JSON.stringify(currentAssessment, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `RiskPassport_${currentAssessment.imo}.json`;
+            a.click();
+            showToast('JSON Паспорт выгружен', 'success');
+        }
+
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toastNotification');
+            document.getElementById('toastMessage').textContent = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 2500);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            handleImoInput(document.getElementById('inputImo').value);
+            loadAuditHistory();
+        });
+    </script>
+<!-- MARINE V3 START --><script>
+/* Shared deterministic assessment for browser and n8n. No navigation or registry claims. */
+(function(root) {
+ 'use strict';
+ const VERSION = '3.0.0';
+ const fields = [
+ ['imo','IMO номер танкера (7 цифр)'], ['vessel_name','Название танкера'],
+ ['destination_country','Страна назначения / Покупатель'], ['route','Маршрут следования (Порты)'],
+ ['declared_price_usd','Заявленная цена нефти ($/баррель)'],
+ ['chokepoint','Критический пролив / опасная зона (выбор из списка)'],
+ ['manual_chokepoints','Дополнительные проливы / ручной ввод нескольких зон (через запятую)'],
+ ['policy_price_limit','Порог цены для сценарного контроля ($/баррель)']
+ ];
+ const zones = [
+ ['bab','Баб-эль-Мандеб / Красное море',12.58,43.33,/мандеб|красное море/i],
+ ['suez','Суэцкий канал',29.97,32.55,/суэц/i],
+ ['bos','Босфор',41.11,29.07,/босфор/i], ['dar','Дарданеллы',40.2,26.4,/дарданелл/i],
+ ['cape','Мыс Доброй Надежды',-35,19,/надежд|африк/i],
+ ['gib','Гибралтар',35.95,-5.6,/гибралтар/i],
+ ['dan','Датские проливы',55.3,11,/датск|балтийск|storeb/i],
+ ['east','Восточно-Китайское море',29.5,123.5,/восточно-китайск|восточно китайск/i],
+ ['taiwan','Тайваньский пролив',24,119,/тайван/i],
+ ['japan','Японское море',40,135,/японск/i],
+ ['hormuz','Ормузский пролив',26.56,56.25,/ормуз|персидск/i],
+ ['malacca','Малаккский пролив',2.5,101.8,/малакк/i],
+ ['sing','Сингапурский пролив',1.25,103.8,/сингапур/i],
+ ['sts','Лаконский залив',36.55,22.6,/лаконск|sts/i]
+ ];
+ const ports = [
+ ['nov','Новороссийск',44.72,37.77,/новороссийск/i], ['prim','Приморск',60.33,28.72,/приморск/i],
+ ['ust','Усть-Луга',59.68,28.4,/усть[ -]луга/i], ['koz','Козьмино',42.72,133.02,/козьмин/i],
+ ['mundra','Мундра',22.83,69.7,/мундр/i], ['vadinar','Вадинар',22.4,69.72,/вадинар/i],
+ ['rizhao','Жичжао',35.35,119.55,/жичжао|жичжау|rizhao/i],
+ ['rot','Роттердам',51.95,4.05,/роттердам/i], ['sg','Сингапур',1.25,103.8,/сингапур/i]
+ ];
+ const identify = (text, list) => list.filter(z=>z[4].test(text)).map(z=>z[0]);
+ function validImo(s) {return /^\d{7}$/.test(s) && s.slice(0,6).split('').reduce((v,d,i)=>v+Number(d)*(7-i),0)%10===Number(s[6]);}
+ function decimal(v, optional=false) {
+  const s=String(v??'').trim();
+  if (!s && optional) return null;
+  if (!/^\d+(?:[.,]\d{1,6})?$/.test(s)) throw Error('Цена: положительное число, точка или запятая, до 6 знаков после разделителя.');
+  const [a,b='']=s.replace(',','.').split('.');
+  const cents=Number(a)*100+Number((b+'00').slice(0,2))+(Number(b[2]||0)>=5?1:0);
+  if (!Number.isSafeInteger(cents)||cents<=0||cents>1000000) throw Error('Цена должна быть больше 0 и не более 10000.');
+  return cents/100;
+ }
+ function normalize(raw) {
+  const body=raw.body&&typeof raw.body==='object'?raw.body:raw; const n={};
+  for (const [key,label] of fields) n[key]=String(body[key]??body[label]??'').trim();
+  if (!validImo(n.imo)) throw Error('IMO: нужны 7 цифр и правильная контрольная сумма mod 10.');
+  for (const key of ['vessel_name','destination_country','route']) if(n[key].length<2||n[key].length>300) throw Error('Заполните '+fields.find(f=>f[0]===key)[1]+' (2–300 символов).');
+  if(n.chokepoint.length>300||n.manual_chokepoints.length>500) throw Error('Слишком длинный список зон.');
+  n.declared_price_usd=decimal(n.declared_price_usd);
+  n.policy_price_limit=decimal(n.policy_price_limit,true);
+  if (/свой вариант/i.test(n.chokepoint)) n.chokepoint='';
+  n.chokepoints=[n.chokepoint,n.manual_chokepoints].filter(Boolean).join(', ');
+  return n;
+ }
+ function routeInfo(n,withAlternatives=true) {
+  const parts=n.route.split(/\s*(?:→|->|=>|;)\s*/).filter(Boolean);
+  const errors=[], warnings=[];
+  if(parts.length<2) errors.push('Укажите порт отправления и назначения через → или ->.');
+  const start=ports.find(p=>p[4].test(parts[0]||''));
+  const end=ports.find(p=>p[4].test(parts.at(-1)||''));
+  const declared=identify(n.route+' '+n.chokepoints,zones);
+  let corridor=null, inferred=[];
+  if(start?.[0]==='koz'&&end?.[0]==='rizhao') {corridor='pacific'; inferred=['japan','east'];}
+  const india=['mundra','vadinar'].includes(end?.[0]);
+  if(['nov','prim','ust'].includes(start?.[0])&&india) {
+   if(declared.includes('cape')) {corridor='cape';inferred=start[0]==='nov'?['bos','dar','gib','cape']:['dan','cape'];}
+   else if(declared.includes('suez')||declared.includes('bab')) {corridor='suez';inferred=start[0]==='nov'?['bos','dar','suez','bab']:['dan','gib','suez','bab'];}
+   else warnings.push('Для пути в Индию уточните коридор: Суэц или мыс Доброй Надежды.');
+  }
+  if(!start||!end||!corridor) warnings.push('Маршрут вне проверяемого каталога. Промежуточные моря автоматически не достраиваются; нужна проверка офицера.');
+  const allowed=new Set([...inferred]);
+  if(corridor) for(const id of declared) if(!allowed.has(id)) errors.push('Зона «'+zones.find(z=>z[0]===id)[1]+'» не входит в выбранный коридор. Проверьте маршрут и цепочку.');
+  for(const token of n.chokepoints.split(/[,;]/).filter(s=>s.trim())) if(!identify(token,zones).length) warnings.push('Неизвестная зона: '+token.trim()+'. Её риск не оценён.');
+  for(const token of parts.slice(1,-1)) if(!identify(token,zones).length&&!/северное море/i.test(token)) warnings.push('Промежуточная точка не распознана: '+token);
+  if(declared.includes('cape')&&declared.includes('bab')) errors.push('Одновременно заданы обход Африки и Баб-эль-Мандеб. Уточните один маршрут.');
+  if(end&&(['rizhao'].includes(end[0])&&!/китай|china/i.test(n.destination_country)||india&&!/индия|india/i.test(n.destination_country))) errors.push('Страна назначения не соответствует известному порту назначения.');
+  const ids=[...new Set([...inferred,...declared])];
+  const known=(id)=>{const z=zones.find(z=>z[0]===id);return {id,name:z[1],point:[z[2],z[3]]};};
+  let points=[];
+  if(corridor) {
+   const middle=inferred.flatMap(id=>id==='japan'?[[40,135],[35.2,130],[34,129.5],[32,126]]:id==='cape'?[[30,-15],[0,-15],[-25,3],[-35,19],[-30,40],[-5,60]]:id==='gib'?[[36,18],[36,2],[35.95,-5.6]]:id==='bab'?[[23,36],[16,41],[12.58,43.33],[13,50]]:[known(id).point]);
+   points=[[start[2],start[3]],...middle,[end[2],end[3]]];
+  }
+  const alternatives=[];
+  if(withAlternatives&&corridor&&errors.length===0){
+   if(corridor==='suez'||corridor==='cape'){
+    const other=routeInfo({...n,route:start[1]+' → '+end[1],chokepoints:corridor==='suez'?'Мыс Доброй Надежды':'Суэц, Баб-эль-Мандеб'},false);
+    alternatives.push({label:corridor==='suez'?'Вариант обхода через мыс Доброй Надежды':'Сравнение через Суэц: критическая зона, не рекомендация',points:other.points,requires_verification:true});
+   }else if(corridor==='pacific'){
+    alternatives.push({label:'Вариант через Цугару и Тихий океан: требует проверки офицера',points:[[start[2],start[3]],[42,137],[41.6,140],[41.6,141.6],[40,144],[35,142],[30,133],[29,130],[29,125],[end[2],end[3]]],requires_verification:true});
+   }
+  }
+  return {corridor,errors,warnings,assumed:inferred.map(id=>known(id).name),zones:ids.map(known),points,alternatives,labels:[start,end].filter(Boolean).map(p=>({point:[p[2],p[3]],name:p[1]}))};
+ }
+ function weather(raw,now=Date.now()) {
+  const h=raw?.hourly, t=h?.time||[];
+  const candidates=t.map((v,i)=>({i,delta:Math.abs(Date.parse(v.endsWith('Z')?v:v+'Z')-now)})).filter(x=>Number.isFinite(x.delta)&&x.delta<=3*3600000).sort((a,b)=>a.delta-b.delta);
+  const i=candidates[0]?.i;
+  const w=i===undefined?null:h.wave_height?.[i], c=i===undefined?null:h.ocean_current_velocity?.[i];
+  const live=typeof w==='number'&&Number.isFinite(w)&&w>=0;
+  return {wave:live?w:null,current:typeof c==='number'&&Number.isFinite(c)?c:null,live,sample_time:i===undefined?null:t[i],source:live?'Open-Meteo Marine':'Нет актуальных данных',current_unit:raw?.hourly_units?.ocean_current_velocity||'не указана'};
+ }
+ function assess(n,w={live:false,wave:null,current:null},requestId='') {
+  const route=routeInfo(n), ids=route.zones.map(z=>z.id), reasons=[],warnings=[...route.warnings];
+  const compliance=n.policy_price_limit===null?null:n.declared_price_usd>n.policy_price_limit?90:15;
+  if(compliance===null) warnings.push('Порог цены не задан: санкционный комплаенс не проверен.');
+  else reasons.push(`Цена ${n.declared_price_usd.toFixed(2)} ${compliance===90?'>':'≤'} сценарного порога ${n.policy_price_limit.toFixed(2)}: ${compliance}/100. Порог не является правовым заключением.`);
+  const war=ids.includes('bab')?88:ids.includes('hormuz')?65:ids.includes('east')?20:15;
+  reasons.push('Маршрутный сценарный индикатор: '+war+'/100. Это не вероятность атаки и не актуальная сводка UKMTO.');
+  const wave=w.live&&typeof w.wave==='number'?Math.min(100,Math.round(w.wave*25)):null;
+  if(wave===null) warnings.push('Актуальная высота волны не получена; погодный риск неизвестен.');
+  else reasons.push(`Волна ${w.wave} м × 25, максимум 100 → ${wave}/100.`);
+  warnings.push('Реестры санкций, AIS, страхование и ограничения судна не подключены; требуется ручная проверка.');
+  const bottleneck=ids.some(id=>['bos','suez','bab','malacca','hormuz'].includes(id))?70:20;
+  const scores={compliance,war,ais:null,weather:wave,bottleneck};
+  const observed=[war,bottleneck,compliance,wave].filter(Number.isFinite);
+  const totalRisk=Math.max(...observed), level=totalRisk>=65?'RED':totalRisk>=40?'YELLOW':'GREEN';
+  const status=route.errors.length?'INPUT_REVIEW_REQUIRED':'AWAITING_OFFICER';
+  return {schema_version:VERSION,request_id:requestId,imo:n.imo,vessel:n.vessel_name,route:n.route,country:n.destination_country,price:n.declared_price_usd,chokepoints:n.chokepoints,parameters:n,route_info:route,totalRisk,level,status,isLowRisk:level==='GREEN',isAutoApproved:false,requires_officer:true,scores,weather:w,reasons,warnings,dominanceReason:route.errors[0]||reasons.join(' '),economics:{warPremium:null,capeFuel:null,capeDemurrage:null},wormHash:'',timestamp:new Date().toISOString()};
+ }
+ const api={VERSION,fields,zones,ports,validImo,decimal,normalize,routeInfo,weather,assess};
+ if(typeof module!=='undefined'&&module.exports) module.exports=api;
+ root.MarineRisk=api;
+})(typeof globalThis!=='undefined'?globalThis:this);
+
+</script><script>
+// UI uses the exact same engine embedded in the generated n8n workflow.
+let assessmentBusy=false;
+function handleChokepointSelect() {} // Selection never adds stale zones to the manual chain.
+async function evaluateVoyageRisk() {
+ if(assessmentBusy)return;
+ const [inputImo,inputVessel,inputCountry,inputRoute,inputPrice,inputChokepoint,inputManualChokepoints]=['inputImo','inputVessel','inputCountry','inputRoute','inputPrice','inputChokepoint','inputManualChokepoints'].map(id=>document.getElementById(id));
+ const btn=document.getElementById('btnSubmitAssessment');
+ const original=btn.innerHTML;
+ let n;
+ try {
+  n=MarineRisk.normalize({imo:inputImo.value,vessel_name:inputVessel.value,destination_country:inputCountry.value,route:inputRoute.value,declared_price_usd:inputPrice.value,chokepoint:inputChokepoint.value,manual_chokepoints:inputManualChokepoints.value,policy_price_limit:document.getElementById('policyPriceLimit').value});
+  inputPrice.value=n.declared_price_usd.toFixed(2);
+ }catch(e){currentAssessment=null;document.getElementById('resultsContainer').classList.add('hidden');showToast(e.message,'error');document.getElementById('assessmentStatus').textContent=e.message;return;}
+ const ri=MarineRisk.routeInfo(n);
+ if(ri.errors.length){showAssessment(MarineRisk.assess(n),false);return;}
+ assessmentBusy=true;btn.disabled=true;btn.textContent='ОЖИДАНИЕ РАСЧЁТА N8N…';
+ currentAssessment=null;
+ document.getElementById('resultsContainer').classList.add('hidden');
+ document.getElementById('assessmentStatus').textContent='Запрос отправляется в n8n. Решение всегда принимает офицер.';
+ const requestId=crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random();
+ try {
+  const result=await dispatchToN8n({...n,request_id:requestId});
+  if(result.schema_version!==MarineRisk.VERSION||result.request_id!==requestId||!result.parameters||!result.scores||!result.route_info||!['RED','YELLOW','GREEN'].includes(result.level)||!Number.isFinite(result.totalRisk)||result.isAutoApproved!==false||result.requires_officer!==true) throw Error('Ответ не соответствует версии 3. Импортируйте обновлённый workflow.');
+  if(result.workflow_revision!=='4.0'||!result.server_audit||!result.assessment_id||!result.access_token)throw Error('Импортируйте AI_Marine_Risk_Radar_FULL.json: требуется серверный журнал и согласование.');
+  const expected=MarineRisk.normalize(result.parameters);
+  if(JSON.stringify(expected)!==JSON.stringify(n)) throw Error('n8n вернул результат для других параметров.');
+  const verified=MarineRisk.assess(n,result.weather,requestId);
+  if(JSON.stringify(verified.scores)!==JSON.stringify(result.scores)||verified.totalRisk!==result.totalRisk||verified.status!==result.status) throw Error('Расчёт n8n не прошёл проверку правил.');
+  showAssessment(result,true);
+ }catch(e){
+  document.getElementById('assessmentStatus').textContent='Результат не получен: '+e.message+'. Локальное решение не подставлено. Проверьте Executions и повторите.';
+  showToast(e.message,'error');
+ }finally{assessmentBusy=false;btn.disabled=false;btn.innerHTML=original;lucide.createIcons();}
+}
+function showAssessment(res,confirmed) {
+ currentAssessment=res;
+ document.getElementById('emptyStatePlaceholder').classList.add('hidden');
+ document.getElementById('resultsContainer').classList.remove('hidden');
+ if(!leafletMap)initMap();
+ renderVerdictBanner(res);renderRiskMatrix(res);renderRadarChart(res);renderEconomicsTab(res);renderHitlTab(res);updateGeospatialMap(res);
+ document.getElementById('assessmentStatus').textContent=confirmed?'Получен и проверен ответ n8n. Ожидается решение офицера.':'Исправьте противоречия маршрута перед отправкой в n8n.';
+ if(confirmed)recordAssessmentInAudit(res);
+ lucide.createIcons();setTimeout(()=>leafletMap.invalidateSize(),100);
+}
+function renderVerdictBanner(res) {
+ const c=res.level==='RED'?'#f87171':res.level==='YELLOW'?'#fbbf24':'#34d399';
+ document.getElementById('verdictBanner').style.borderColor=c;
+ const pill=document.getElementById('verdictPill');pill.textContent=(res.status==='INPUT_REVIEW_REQUIRED'?'ПРОВЕРЬТЕ ВВОД':'ОЖИДАЕТ РИСК-ОФИЦЕРА')+' • '+res.level;pill.style.color=c;
+ document.getElementById('verdictTitle').textContent='Наблюдаемый риск '+res.totalRisk+'/100. Полнота проверки ограничена; автоодобрения нет.';
+ document.getElementById('resVesselName').textContent=res.vessel;
+ document.getElementById('resImo').textContent=res.imo;
+ document.getElementById('resRoute').textContent=res.route;
+ document.getElementById('totalRiskScore').textContent=res.totalRisk;
+ document.getElementById('totalRiskScore').style.color=c;
+ document.getElementById('dominanceStatusLabel').textContent='Максимум известных индикаторов';
+ document.getElementById('dominanceStatusLabel').style.color=c;
+ document.getElementById('wormShortBadge').textContent='ID: '+(res.request_id||'ввод');
+ const detail=document.getElementById('assessmentDetails');
+  detail.textContent=[...res.route_info.errors,...res.reasons,...res.warnings,'Достроенные точки каталога: '+(res.route_info.assumed.join(' → ')||'нет'),'Помощник LLM (непроверенный текст): '+((res.llm_checklist||[]).join('; ')||'ответ не получен')].join('\n• ');
+ document.getElementById('liveWaveHeight').textContent=res.weather.live?res.weather.wave+' м':'Нет данных';
+ document.getElementById('liveCurrentSpeed').textContent=res.weather.current===null?'Нет данных':res.weather.current+' '+res.weather.current_unit;
+ document.getElementById('weatherZoneLabel').textContent=res.weather.source+' • '+(res.weather.sample_time||'время неизвестно');
+}
+function renderRiskMatrix(res) {
+ const labels={compliance:'Цена относительно заданного порога',war:'Маршрутный индикатор (сценарная модель)',ais:'Проверка AIS и реестров',weather:'Высота волны в одной контрольной точке',bottleneck:'Наличие узостей в коридоре'};
+ document.getElementById('riskMatrixTableBody').innerHTML=Object.entries(res.scores).map(([key,v])=>`<tr><td class="py-3">${labels[key]}</td><td>${v===null?'Нет данных':'Сценарное правило'}</td><td>${v===null?'—':v+'/100'}</td><td>${v===null?'Неизвестно':v>=65?'Красный':v>=40?'Жёлтый':'Зелёный'}; проверяет офицер</td></tr>`).join('');
+}
+function renderRadarChart(res) {
+ if(radarChartInstance)radarChartInstance.destroy();
+ const keys=['compliance','war','ais','weather','bottleneck'],names=['Цена','Военный риск','AIS / STS','Погода','Узости'];
+ radarChartInstance=new Chart(document.getElementById('riskRadarChart').getContext('2d'),{type:'radar',data:{labels:names.map((v,i)=>v+(res.scores[keys[i]]===null?' (?)':'')),datasets:[{label:'Известные индикаторы',data:keys.map(k=>res.scores[k]),borderColor:res.level==='RED'?'#f87171':'#60a5fa',pointBackgroundColor:'#93c5fd',pointRadius:4,borderWidth:2,backgroundColor:'rgba(96,165,250,.22)',spanGaps:false,fill:true}]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:12},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw===null?'Нет данных':c.raw+'/100'}}},scales:{r:{min:0,max:100,grid:{color:'#52647e'},angleLines:{color:'#52647e'},pointLabels:{color:'#e2e8f0',font:{size:12,weight:'600'}},ticks:{display:true,stepSize:20,color:'#94a3b8',showLabelBackdrop:false,font:{size:9}}}}}});
+}
+function renderEconomicsTab(res) {
+ document.getElementById('tabContent-economics').replaceChildren();
+}
+function renderHitlTab(res) {
+ document.getElementById('fullWormSignature').textContent=res.request_id||'Нет ID';
+ document.querySelectorAll('[onclick^="submitOfficerResolution"]').forEach(b=>b.disabled=res.status==='INPUT_REVIEW_REQUIRED');
+}
+function updateGeospatialMap(res) {
+ for(const key of ['directRoute','capeRoute','vesselMarker'])if(mapLayers[key]){leafletMap.removeLayer(mapLayers[key]);mapLayers[key]=null;}
+ for(const key of ['hazardCircles','corridorMarkers']){mapLayers[key].forEach(x=>leafletMap.removeLayer(x));mapLayers[key]=[];}
+ const r=res.route_info;
+ if(r.errors.length||!r.points.length){leafletMap.setView([20,50],2);return;}
+ mapLayers.directRoute=L.polyline(r.points,{color:res.level==='RED'?'#ef4444':'#60a5fa',weight:3}).bindTooltip('Схема выбранного коридора; не навигационная прокладка').addTo(leafletMap);
+ const alt=r.alternatives?.[0];if(alt?.points.length)mapLayers.capeRoute=L.polyline(alt.points,{color:'#fbbf24',weight:3,dashArray:'8,6'}).bindTooltip(alt.label,{sticky:true}).addTo(leafletMap);
+ [...r.labels,...r.zones].forEach(p=>mapLayers.corridorMarkers.push(L.circleMarker(p.point,{radius:4}).bindTooltip(p.name).addTo(leafletMap)));
+ const bounds=mapLayers.directRoute.getBounds();if(mapLayers.capeRoute)bounds.extend(mapLayers.capeRoute.getBounds());leafletMap.fitBounds(bounds,{padding:[30,30],maxZoom:5});
+}
+function submitOfficerResolution() {
+ if(!currentAssessment?.server_audit)return showToast('Сначала получите сохранённую оценку из полного workflow.','error');
+ const url=new URL(currentAssessment.officer_form_url);
+ if(url.origin!=='https://lavrik.app.n8n.cloud'||url.pathname!=='/form/marine-risk-officer-v4')return showToast('Неверный адрес формы офицера.','error');
+ window.open(url.href,'_blank','noopener,noreferrer');
+ document.getElementById('assessmentStatus').textContent='Решение вводится в защищённой форме n8n. После сохранения нажмите «Обновить решение». ID: '+currentAssessment.assessment_id;
+}
+async function refreshOfficerDecision() {
+ const a=currentAssessment;if(!a?.server_audit)return;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+ try{
+  const r=await fetch('https://lavrik.app.n8n.cloud/webhook/marine-risk-status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({assessment_id:a.assessment_id,access_token:a.access_token}),signal:controller.signal});
+  if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();
+  if(currentAssessment!==a)return;
+  if(d.assessment_id!==a.assessment_id||d.imo!==a.imo||!d.server_audit||!['AWAITING_OFFICER','MORE_DATA_REQUIRED','OFFICER_BLOCKED','OFFICER_APPROVED'].includes(d.status))throw Error('Серверный статус не прошёл проверку');
+  a.status=d.status;a.officer_decision=d.decision;
+  const labels={AWAITING_OFFICER:'Ожидается решение офицера',MORE_DATA_REQUIRED:'Офицер запросил дополнительные данные',OFFICER_BLOCKED:'Офицер заблокировал рейс',OFFICER_APPROVED:'Решение офицера: согласовано'};
+  document.getElementById('verdictPill').textContent=labels[d.status];
+  document.getElementById('assessmentStatus').textContent=labels[d.status]+'. Подтверждено n8n, запись '+d.audit_row_id+(d.decision?' — '+d.decision.officer+': '+d.decision.note:'');
+  const e=auditHistory.find(x=>x.id===a.request_id);if(e){e.decision=labels[d.status];e.officer_decision=d.decision;saveAuditHistory();}
+ }catch(e){showToast('Не удалось получить решение: '+e.message,'error');}finally{clearTimeout(timer);}
+}
+function recordAssessmentInAudit(res) {
+ auditHistory.unshift({id:res.request_id,timestamp:res.timestamp,vessel:res.vessel,imo:res.imo,route:res.route,totalRisk:res.totalRisk,decision:res.status,wormHash:res.request_id});auditHistory=auditHistory.slice(0,50);saveAuditHistory();
+}
+async function copyWormSignature(){try{await navigator.clipboard.writeText(currentAssessment?.request_id||'');showToast('ID скопирован');}catch{showToast('Выделите ID и скопируйте вручную.');}}
+window.addEventListener('DOMContentLoaded',()=>{
+ const inputPrice=document.getElementById('inputPrice'),inputManualChokepoints=document.getElementById('inputManualChokepoints');
+ const country=document.getElementById('inputCountry');
+ const input=document.createElement('input');input.id='inputCountry';input.className=country.className;input.value='Индия';input.required=true;input.maxLength=300;input.setAttribute('list','countries');
+ const list=document.createElement('datalist');list.id='countries';list.innerHTML=['Индия','Китай','Турция','ОАЭ','Нидерланды','Сингапур'].map(v=>'<option value="'+v+'">').join('');country.replaceWith(input);input.after(list);
+ inputPrice.type='text';inputPrice.inputMode='decimal';inputPrice.removeAttribute('step');inputPrice.removeAttribute('min');inputPrice.removeAttribute('max');
+ const info=(text)=>'<details class="price-info"><summary aria-label="Информация">ⓘ</summary><span role="tooltip">'+text+'</span></details>';
+ const style=document.createElement('style');style.textContent='.price-info{display:inline-block;position:relative;vertical-align:middle;margin-left:6px}.price-info summary{list-style:none;cursor:pointer;color:#93c5fd;border-radius:50%;padding:2px 4px}.price-info summary::-webkit-details-marker{display:none}.price-info>span{display:none;position:absolute;z-index:100;right:0;bottom:100%;width:230px;padding:10px;background:#020617;color:#e2e8f0;border:1px solid #475569;border-radius:8px;font-size:12px;font-weight:400;line-height:1.5}.price-info:hover>span,.price-info:focus-within>span,.price-info[open]>span{display:block}.price-info summary:focus-visible{outline:2px solid #60a5fa}';document.head.append(style);
+ inputPrice.parentElement.querySelector('label').insertAdjacentHTML('beforeend',info('Точка или запятая; до 6 знаков после разделителя. Цена округляется до 2 знаков по правилу: третья цифра 5 и выше увеличивает вторую на 1.'));
+ inputPrice.insertAdjacentHTML('afterend','<div class="mt-3"><label for="policyPriceLimit">Порог цены, $/bbl</label>'+info('Необязательный порог для сценарного контроля. Превышение даёт красный индикатор цены. Это не действующий правовой лимит. Без порога ценовой комплаенс не оценён.')+'<input id="policyPriceLimit" inputmode="decimal" placeholder="Не задан" class="w-full bg-slate-900 border rounded p-2"></div>');
+ inputManualChokepoints.value='';document.getElementById('officerNameInput').value='';document.getElementById('officerNoteInput').value='';
+ document.getElementById('voyageForm').insertAdjacentHTML('afterend','<p id="assessmentStatus" role="status" class="p-3 text-amber-300">Все рейсы требуют проверки офицера. Текущие котировки, AIS и санкционные реестры не подключены.</p>');
+ document.getElementById('verdictBanner').insertAdjacentHTML('afterend','<div id="assessmentDetails" class="p-4 text-sm text-slate-300" style="white-space:pre-line"></div>');
+ document.getElementById('map').insertAdjacentHTML('afterend','<div class="p-3 text-xs text-slate-300">━ Синий / красный: выбранный путь · <span style="color:#fbbf24">┄ Жёлтый пунктир: вариант обхода / сравнения</span><br>Обход требует проверки глубин, ограничений судна, погоды, расстояния и стоимости. Наличие линии не означает согласование.</div>');
+ const hiddenEconomics=document.createElement('style');hiddenEconomics.textContent='#tabBtn-economics,#tabContent-economics{display:none!important}';document.head.append(hiddenEconomics);
+ document.getElementById('tabContent-economics').replaceChildren();
+ for(const id of ['tabBtn-hitl','tabBtn-audit']){const b=document.getElementById(id);if(b)for(const span of b.querySelectorAll('span'))span.textContent=span.textContent.replace('3. Решение','2. Решение').replace('4. Журнал','3. Журнал');}
+ const buttons=document.querySelectorAll('[onclick^="submitOfficerResolution"]');
+ buttons[0].textContent='Открыть защищённую форму офицера';buttons[0].setAttribute('onclick','submitOfficerResolution()');
+ buttons[1].textContent='Обновить решение из n8n';buttons[1].setAttribute('onclick','refreshOfficerDecision()');buttons[2].remove();buttons[3].remove();
+ document.getElementById('officerNameInput').closest('.grid').innerHTML='<p>Офицер вводит имя, обоснование и ссылки на документы в защищённой форме n8n. Решение сохраняется на сервере, затем программа запрашивает его по ключу оценки.</p>';
+ document.querySelectorAll('#voyageForm input,#voyageForm select').forEach(el=>el.addEventListener('input',()=>{if(!assessmentBusy&&currentAssessment){currentAssessment=null;document.getElementById('resultsContainer').classList.add('hidden');document.getElementById('assessmentStatus').textContent='Параметры изменены. Выполните новый расчёт.';}}));
+});
+
+</script><!-- MARINE V3 END -->
+</body>
+</html>
